@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, Integer, Index
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, Integer, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -57,6 +57,7 @@ class Lot(Base):
 
     __table_args__ = (
         Index("idx_lots_cadastral_gin", "cadastral_numbers", postgresql_using="gin"),
+        UniqueConstraint("auction_id", "lot_number", name="lots_auction_id_lot_number_key"),
     )
 
 

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import delete
 from src.database.models import Auction, Lot, MessageHistory, PriceSchedule, LotStatus
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class IngestionService:
                 index_elements=[Auction.guid],
                 set_=dict(
                     number=auction_dto['number'],
-                    last_updated=datetime.utcnow()
+                    last_updated=datetime.now(timezone.utc)
                 )
             )
             await session.execute(stmt_auction)
@@ -44,50 +44,53 @@ class IngestionService:
 
             # 3. Process Lots
             for lot_data in lots_dto:
-                # Ищем существующий лот в рамках этих торгов по номеру лота
-                # Так как GUID лота может меняться или отсутствовать в ранних стадиях
+                # Извлекаем статус корректно (если вдруг в DTO пришла строка, или Enum)
+                status_value = lot_data.get('status', LotStatus.ANNOUNCED.value)
+                if isinstance(status_value, LotStatus):
+                    status_value = status_value.value
+
                 stmt_lot = insert(Lot).values(
                     auction_id=auction_dto['guid'],
                     lot_number=lot_data.get('lot_number', 1),
                     description=lot_data['description'],
                     start_price=lot_data['start_price'],
                     category_code=lot_data.get('category_code'),
-                    cadastral_numbers=lot_data.get('cadastral_numbers', []),
-                    status=lot_data.get('status', LotStatus.ANNOUNCED.value)
+                    cadastral_numbers=list(lot_data.get('cadastral_numbers') or []),
+                    status=status_value
                 ).on_conflict_do_update(
-                    # Для PostgreSQL используем индекс для конфликта
-                    index_elements=['auction_id', 'lot_number'],
+                    # Теперь этот constraint существует в базе!
+                    constraint='lots_auction_id_lot_number_key',
                     set_=dict(
                         description=lot_data['description'],
                         start_price=lot_data['start_price'],
                         category_code=lot_data.get('category_code'),
-                        cadastral_numbers=lot_data.get('cadastral_numbers', []),
-                        status=lot_data.get('status', LotStatus.ANNOUNCED.value),
-                        guid=insert.excluded.guid  # Обновляем GUID, если он появился
+                        cadastral_numbers=list(lot_data.get('cadastral_numbers') or []),
+                        status=status_value
                     )
                 ).returning(Lot.id)
-                
+
                 result = await session.execute(stmt_lot)
                 lot_id = result.scalar_one_or_none()
 
                 # 4. Process Price Schedules (if any)
                 if lot_data.get('price_schedules'):
-                    # Удаляем старый график и записываем новый (актуальный для текущего сообщения)
-                    # Это проще, чем матчить интервалы дат
+                    # Удаляем старые
                     await session.execute(delete(PriceSchedule).where(PriceSchedule.lot_id == lot_id))
-                    
-                    for sched in lot_data['price_schedules']:
-                        new_sched = PriceSchedule(
+
+                    # Генератором создаем список объектов (быстрее чем add в цикле)
+                    new_schedules = [
+                        PriceSchedule(
                             lot_id=lot_id,
                             date_start=sched['date_start'],
                             date_end=sched['date_end'],
                             price=sched['price']
-                        )
-                        session.add(new_sched)
-                
+                        ) for sched in lot_data['price_schedules']
+                    ]
+                    session.add_all(new_schedules) # Используем add_all
+
             await session.commit()
             logger.info(f"Successfully ingested auction {auction_dto['guid']} with {len(lots_dto)} lots")
-            
+
         except Exception as e:
             await session.rollback()
             logger.error(f"Failed to ingest data for auction {auction_dto.get('guid')}: {str(e)}")
