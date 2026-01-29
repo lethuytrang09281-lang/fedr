@@ -13,7 +13,8 @@ from src.services.xml_parser import XMLParserService
 from src.services.ingestor import IngestionService
 from src.config import settings
 from src.database.models import LotStatus
-from src.schemas import AuctionDTO, LotDTO, MessageDTO
+from src.schemas import AuctionDTO, LotDTO, MessageDTO, PriceScheduleDTO
+from src.logic.price_calculator import PriceCalculator
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class Orchestrator:
         self.client = EfrsbClient()
         self.parser = XMLParserService()
         self.ingestor = IngestionService()
+        self.price_calculator = PriceCalculator()
         self.engine = create_async_engine(settings.database_url)
         self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -185,10 +187,10 @@ class Orchestrator:
 
             logger.info(f"Processing message {message.guid} with type {message.type}")
 
-            # Парсим XML-контент
-            lots_data = await asyncio.get_event_loop().run_in_executor(
+            # Парсим XML-контент (теперь возвращает лоты и графики цен)
+            lots_data, price_schedules = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
-                self.parser.parse_content,
+                self._parse_with_schedules,
                 message.content,
                 str(message.guid)
             )
@@ -241,7 +243,11 @@ class Orchestrator:
                     message_dto=message_dto
                 )
 
-            logger.info(f"Successfully processed message {message.guid} with {len(filtered_lots)} lots")
+            # Обработка графиков цен (если есть)
+            if price_schedules:
+                await self._process_price_schedules(price_schedules)
+
+            logger.info(f"Successfully processed message {message.guid} with {len(filtered_lots)} lots and {len(price_schedules)} price schedules")
 
         except Exception as e:
             logger.error(f"Error processing message {message.guid}: {str(e)}")
@@ -280,6 +286,33 @@ class Orchestrator:
                     break
 
         return filtered_lots
+
+    def _parse_with_schedules(self, xml_content: str, message_guid: str):
+        """
+        Парсит XML-контент и возвращает лоты и графики цен
+        """
+        return self.parser.parse_content(xml_content, message_guid)
+
+    async def _process_price_schedules(self, price_schedules: List[PriceScheduleDTO]):
+        """
+        Обработка графиков цен
+        """
+        for schedule in price_schedules:
+            try:
+                # Рассчитываем текущую цену на основе графика
+                calculation_result = self.price_calculator.calculate_current_price(
+                    start_price=schedule.price,
+                    schedule_html=schedule.schedule_html,
+                    start_date=schedule.date_start
+                )
+
+                logger.info(f"Calculated price for schedule {schedule.lot_id}: {calculation_result.current_price}, status: {calculation_result.schedule_status}")
+
+                # Здесь можно добавить сохранение результатов расчета в базу данных
+                # или отправку в другую систему для дальнейшей обработки
+
+            except Exception as e:
+                logger.error(f"Error processing price schedule {schedule.lot_id}: {str(e)}")
 
 
 # Глобальный экземпляр orchestrator для удобства

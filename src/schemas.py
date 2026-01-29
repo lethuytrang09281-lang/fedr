@@ -55,3 +55,20 @@ class MessageDTO(BaseModel):
     type: str
     date_publish: datetime
     content_xml: str
+
+
+class PriceScheduleDTO(BaseModel):
+    """DTO для графика снижения цены"""
+    lot_id: int
+    date_start: datetime
+    date_end: datetime
+    price: float
+    schedule_html: Optional[str] = None  # HTML-представление графика
+
+
+class PriceCalculationResult(BaseModel):
+    """Результат расчета цены на текущий момент"""
+    current_price: float
+    next_reduction_date: Optional[datetime] = None
+    days_to_next_reduction: Optional[int] = None
+    schedule_status: str  # active, completed, not_started
