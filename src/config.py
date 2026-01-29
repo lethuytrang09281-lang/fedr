@@ -29,13 +29,8 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def database_url(self) -> str:
-        # Используем PostgreSQL для продакшена, SQLite для локальной разработки
-        if self.DB_HOST in ["localhost", "127.0.0.1"]:
-            # Для локальной разработки используем SQLite
-            return "sqlite+aiosqlite:///./fedresurs.db"
-        else:
-            # Для Docker и продакшена используем PostgreSQL
-            return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        # Используем PostgreSQL для локальной разработки и продакшена
+        return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     @property
     def base_url(self) -> str:
