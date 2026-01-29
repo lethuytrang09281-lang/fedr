@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator, CHAR
 from sqlalchemy.dialects.postgresql import UUID
@@ -58,11 +58,14 @@ class Trade(Base):
     """Сущность Торгов (сообщение о проведении торгов)"""
     __tablename__ = "trades"
 
-    guid: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True)
+    guid: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, unique=True)
     trade_number: Mapped[Optional[str]] = mapped_column(String(50), index=True)
     platform_name: Mapped[Optional[str]] = mapped_column(String(255))
     publish_date: Mapped[datetime] = mapped_column(DateTime, index=True)
     is_annulled: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[Optional[str]] = mapped_column(String(50), default="active")  # Добавлено поле статуса
+    pub_date: Mapped[datetime] = mapped_column(DateTime)  # Дата публикации
+    etp_name: Mapped[Optional[str]] = mapped_column(String(255))  # Название площадки
 
     # Связь с лотами
     lots: Mapped[List["Lot"]] = relationship("Lot", back_populates="trade", cascade="all, delete-orphan")
@@ -72,11 +75,16 @@ class Lot(Base):
     """Лоты внутри конкретных торгов"""
     __tablename__ = "lots"
 
-    guid: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    guid: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True)
     trade_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trades.guid", ondelete="CASCADE"))
     lot_number: Mapped[int] = mapped_column(default=1)
     description: Mapped[str] = mapped_column(Text)
     start_price: Mapped[Optional[float]] = mapped_column(Numeric(15, 2))
     status: Mapped[Optional[str]] = mapped_column(String(100))
+    cadastral_numbers: Mapped[Optional[str]] = mapped_column(Text)  # Кадастровые номера
+    classifier_code: Mapped[Optional[str]] = mapped_column(String(50))  # Код классификатора
+
+    # Уникальность: комбинация trade_id и lot_number
+    __table_args__ = (UniqueConstraint('trade_id', 'lot_number', name='uq_trade_lot'),)
 
     trade: Mapped["Trade"] = relationship("Trade", back_populates="lots")

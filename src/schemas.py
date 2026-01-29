@@ -22,3 +22,11 @@ class TradeResponseSchema(BaseModel):
 
 class AuthToken(BaseModel):
     jwt: str
+
+
+class LotData(BaseModel):
+    description: str
+    start_price: float
+    cadastral_numbers: List[str]
+    message_guid: str
+    classifier_code: str

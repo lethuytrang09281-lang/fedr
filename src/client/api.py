@@ -74,7 +74,7 @@ class EfrsbClient:
         offset: int = 0,
         limit: int = 500
     ) -> TradeResponseSchema:
-        """Получение списка торгов с пагинацией"""
+        """Получение списка торгов с пагинацией (только торги BiddingInvitation)"""
         params = {
             "datePublishBegin": date_start,
             "datePublishEnd": date_end,
@@ -84,6 +84,30 @@ class EfrsbClient:
         }
 
         data = await self._request("GET", "/v1/trade-messages", params=params)
+        return TradeResponseSchema(**data)
+
+    async def search_messages(
+        self,
+        date_start: str,
+        date_end: str,
+        message_type: Optional[str] = None,  # Для поиска конкретного типа сообщений
+        offset: int = 0,
+        limit: int = 500
+    ) -> TradeResponseSchema:
+        """Общий метод поиска сообщений (торги, инвентаризация, оценка и т.д.)"""
+        params = {
+            "datePublishBegin": date_start,
+            "datePublishEnd": date_end,
+            "includeContent": "true",
+            "offset": offset,
+            "limit": limit
+        }
+
+        # Добавляем тип сообщения, если указан
+        if message_type:
+            params["type"] = message_type
+
+        data = await self._request("GET", "/v1/messages", params=params)
         return TradeResponseSchema(**data)
 
     async def close(self):

@@ -13,5 +13,24 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - db
+    environment:
+      - DB_HOST=db  # Для запуска в Docker используем имя сервиса
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_NAME=fedresurs_db
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+
 volumes:
   postgres_data:

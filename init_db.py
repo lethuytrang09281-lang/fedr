@@ -6,11 +6,11 @@ from src.config import settings
 
 async def init_db():
     engine = create_async_engine(settings.database_url)
-    
+
     async with engine.begin() as conn:
         # Создаем все таблицы
         await conn.run_sync(Base.metadata.create_all)
-    
+
     print("База данных инициализирована успешно!")
 
 

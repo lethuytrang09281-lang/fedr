@@ -17,7 +17,8 @@ async def main():
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 
-        response = await client.get_trade_messages(start_date, end_date)
+        # Используем обновленный метод для поиска всех типов сообщений
+        response = await client.search_messages(start_date, end_date)
         print(f"Получено {response.total} сообщений")
 
         # Обработка каждого сообщения
@@ -25,15 +26,15 @@ async def main():
             print(f"\nОбработка сообщения: {message.number}, тип: {message.type}")
             print(f"Дата публикации: {message.datePublish}")
 
-            # Используем XML-парсер для обработки содержимого
+            # Используем обновленный XML-парсер для обработки содержимого
             try:
-                trade, lots = XMLParserService.parse_xml_content(message.content)
+                parser = XMLParserService()
+                lots_data = parser.parse_content(message.content, str(message.guid))
 
-                print(f"  Обработано: Торги №{trade.trade_number}")
-                print(f"  Найдено лотов: {len(lots)}")
+                print(f"  Найдено лотов: {len(lots_data)}")
 
-                for i, lot in enumerate(lots):
-                    print(f"    Лот {lot.lot_number}: {lot.description[:60]}..., Цена: {lot.start_price}")
+                for i, lot_data in enumerate(lots_data):
+                    print(f"    Лот: {lot_data.description[:60]}..., Цена: {lot_data.start_price}, Классификатор: {lot_data.classifier_code}")
 
             except Exception as e:
                 print(f"  Ошибка при парсинге XML: {str(e)}")

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     MAX_REQS_PER_SECOND: int = 8
 
     # Database
-    DB_HOST: str = "localhost"
+    DB_HOST: str = "localhost"  # Для локального запуска
     DB_PORT: int = 5432
     DB_USER: str = "postgres"
     DB_PASSWORD: str = "password"
@@ -24,7 +24,13 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         # Используем SQLite для локальной разработки
-        return "sqlite+aiosqlite:///./fedresurs.db"
+        # Для запуска в Docker измените на PostgreSQL URL
+        if self.DB_HOST == "db":
+            # Конфигурация для Docker
+            return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        else:
+            # Конфигурация для локальной разработки
+            return "sqlite+aiosqlite:///./fedresurs.db"
 
     @property
     def base_url(self) -> str:
