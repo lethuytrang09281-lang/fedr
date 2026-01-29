@@ -10,7 +10,7 @@ class EfrsbMessageSchema(BaseModel):
     guid: UUID
     datePublish: datetime
     type: str
-    isAnnulled: bool
+    isAnnulled: Optional[bool] = None  # Сделали поле опциональным
     content: str  # XML string
     number: Optional[str] = None
 
