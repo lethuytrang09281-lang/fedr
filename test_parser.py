@@ -1,5 +1,5 @@
 from src.services.xml_parser import XMLParserService
-from src.database.models import Trade, Lot
+from src.database.models import Lot
 import asyncio
 
 

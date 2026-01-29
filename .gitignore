@@ -52,3 +52,17 @@ wheels/
 
 # Project specific
 fedresurs.db
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.coverage
+.pytest_cache/
+.covers/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+.direnv/

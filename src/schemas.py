@@ -30,3 +30,28 @@ class LotData(BaseModel):
     cadastral_numbers: List[str]
     message_guid: str
     classifier_code: str
+    lot_number: int = 1  # Добавляем номер лота по умолчанию
+
+
+class AuctionDTO(BaseModel):
+    guid: UUID
+    number: str
+    etp_id: Optional[str] = None
+    organizer_inn: Optional[str] = None
+
+
+class LotDTO(BaseModel):
+    lot_number: int = 1
+    description: str
+    start_price: float
+    category_code: Optional[str] = None
+    cadastral_numbers: List[str] = []
+    status: Optional[str] = "Announced"
+    price_schedules: List[dict] = []
+
+
+class MessageDTO(BaseModel):
+    guid: UUID
+    type: str
+    date_publish: datetime
+    content_xml: str

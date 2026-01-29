@@ -44,7 +44,7 @@ class EfrsbClient:
         session = await self._get_session()
         url = f"{self.base_url}{path}"
 
-        for attempt in range(3):  # Retry policy
+        for attempt in range(5):  # Увеличенное количество попыток для лучшей устойчивости
             async with self.limiter:
                 headers = kwargs.pop("headers", {})
                 headers["Authorization"] = f"Bearer {self._token}"
@@ -52,20 +52,27 @@ class EfrsbClient:
                 try:
                     async with session.request(method, url, headers=headers, **kwargs) as resp:
                         if resp.status == 401:
+                            logger.warning("Token expired, re-authenticating...")
                             await self.login()
                             continue
-                        if resp.status == 429:
-                            wait_time = (attempt + 1) * 2
+                        elif resp.status == 429:
+                            wait_time = (attempt + 1) * 5  # Увеличиваем задержку при рейт-лимите
                             logger.warning(f"Rate limited. Waiting {wait_time}s...")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        elif resp.status == 502:
+                            wait_time = (attempt + 1) * 3  # Задержка при 502 ошибке
+                            logger.warning(f"Bad Gateway. Waiting {wait_time}s before retry...")
                             await asyncio.sleep(wait_time)
                             continue
                         resp.raise_for_status()
                         return await resp.json()
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                    if attempt == 2:
+                    if attempt == 4:  # Если последние попытки тоже неудачны
+                        logger.error(f"Request failed after 5 attempts: {e}")
                         raise
-                    logger.error(f"Request failed: {e}. Retrying...")
-                    await asyncio.sleep(1)
+                    logger.warning(f"Request attempt {attempt + 1} failed: {e}. Retrying...")
+                    await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка
 
     async def get_trade_messages(
         self,

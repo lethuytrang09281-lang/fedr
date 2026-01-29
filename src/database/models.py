@@ -1,90 +1,87 @@
-import uuid
+import enum
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import TypeDecorator, CHAR
-from sqlalchemy.dialects.postgresql import UUID
-from .base import Base  # Импортируем Base из базового файла
+from uuid import UUID
+
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, Integer, Index
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
-# Класс для поддержки UUID в разных диалектах SQL
-class GUID(TypeDecorator):
-    """Platform-independent GUID type.
-    Uses PostgreSQL's UUID type, otherwise uses CHAR(32), storing as stringified hex values.
-    """
-    impl = CHAR
-    cache_ok = True
-
-    def load_dialect_impl(self, dialect):
-        if dialect.name == 'postgresql':
-            return dialect.type_descriptor(UUID())
-        else:
-            return dialect.type_descriptor(CHAR(32))
-
-    def process_bind_param(self, value, dialect):
-        if value is None:
-            return value
-        elif dialect.name == 'postgresql':
-            return str(value)
-        else:
-            if not isinstance(value, uuid.UUID):
-                return "%.32x" % uuid.UUID(value).int
-            else:
-                # hexstring
-                return "%.32x" % value.int
-
-    def process_result_value(self, value, dialect):
-        if value is None:
-            return value
-        else:
-            if not isinstance(value, uuid.UUID):
-                value = uuid.UUID(value)
-            return value
+class Base(DeclarativeBase):
+    pass
 
 
-class RawMessage(Base):
-    """Таблица для хранения сырых данных (Audit Trail)"""
-    __tablename__ = "raw_messages"
-
-    guid: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True)
-    message_type: Mapped[str] = mapped_column(String(100))
-    raw_json: Mapped[dict] = mapped_column(Text)  # SQLite не поддерживает JSON тип напрямую
-    xml_content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+class LotStatus(enum.Enum):
+    ANNOUNCED = "Announced"
+    ACTIVE = "Active"
+    FAILED = "Failed"
+    SOLD = "Sold"
+    CANCELLED = "Cancelled"
 
 
-class Trade(Base):
-    """Сущность Торгов (сообщение о проведении торгов)"""
-    __tablename__ = "trades"
+class Auction(Base):
+    """Торги (Основание для лотов)"""
+    __tablename__ = "auctions"
 
-    guid: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, unique=True)
-    trade_number: Mapped[Optional[str]] = mapped_column(String(50), index=True)
-    platform_name: Mapped[Optional[str]] = mapped_column(String(255))
-    publish_date: Mapped[datetime] = mapped_column(DateTime, index=True)
-    is_annulled: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[Optional[str]] = mapped_column(String(50), default="active")  # Добавлено поле статуса
-    pub_date: Mapped[datetime] = mapped_column(DateTime)  # Дата публикации
-    etp_name: Mapped[Optional[str]] = mapped_column(String(255))  # Название площадки
+    guid: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True)
+    number: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    etp_id: Mapped[Optional[str]] = mapped_column(String(255))
+    organizer_inn: Mapped[Optional[str]] = mapped_column(String(20), index=True)
+    last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Связь с лотами
-    lots: Mapped[List["Lot"]] = relationship("Lot", back_populates="trade", cascade="all, delete-orphan")
+    lots: Mapped[List["Lot"]] = relationship("Lot", back_populates="auction", cascade="all, delete-orphan")
+    messages: Mapped[List["MessageHistory"]] = relationship("MessageHistory", back_populates="auction")
 
 
 class Lot(Base):
-    """Лоты внутри конкретных торгов"""
+    """Лоты торгов"""
     __tablename__ = "lots"
 
-    guid: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True)
-    trade_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trades.guid", ondelete="CASCADE"))
-    lot_number: Mapped[int] = mapped_column(default=1)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guid: Mapped[Optional[UUID]] = mapped_column(PG_UUID, index=True) # Может отсутствовать в некоторых сообщениях
+    auction_id: Mapped[UUID] = mapped_column(ForeignKey("auctions.guid", ondelete="CASCADE"))
+
+    lot_number: Mapped[int] = mapped_column(Integer)
     description: Mapped[str] = mapped_column(Text)
-    start_price: Mapped[Optional[float]] = mapped_column(Numeric(15, 2))
-    status: Mapped[Optional[str]] = mapped_column(String(100))
-    cadastral_numbers: Mapped[Optional[str]] = mapped_column(Text)  # Кадастровые номера
-    classifier_code: Mapped[Optional[str]] = mapped_column(String(50))  # Код классификатора
+    start_price: Mapped[Optional[float]] = mapped_column(Numeric(20, 2))
+    category_code: Mapped[Optional[str]] = mapped_column(String(20), index=True)
 
-    # Уникальность: комбинация trade_id и lot_number
-    __table_args__ = (UniqueConstraint('trade_id', 'lot_number', name='uq_trade_lot'),)
+    # Кадастровые номера
+    cadastral_numbers: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
 
-    trade: Mapped["Trade"] = relationship("Trade", back_populates="lots")
+    status: Mapped[LotStatus] = mapped_column(String(50), default=LotStatus.ANNOUNCED)
+
+    auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")
+    price_schedules: Mapped[List["PriceSchedule"]] = relationship("PriceSchedule", back_populates="lot", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_lots_cadastral_gin", "cadastral_numbers", postgresql_using="gin"),
+    )
+
+
+class MessageHistory(Base):
+    """История всех полученных XML-сообщений для аудита и версионирования"""
+    __tablename__ = "messages"
+
+    guid: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True)
+    auction_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("auctions.guid"))
+    type: Mapped[str] = mapped_column(String(100))
+    date_publish: Mapped[datetime] = mapped_column(DateTime, index=True)
+    content_xml: Mapped[str] = mapped_column(Text)
+
+    auction: Mapped["Auction"] = relationship("Auction", back_populates="messages")
+
+
+class PriceSchedule(Base):
+    """График снижения цены (для Публичного предложения)"""
+    __tablename__ = "price_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lot_id: Mapped[int] = mapped_column(ForeignKey("lots.id", ondelete="CASCADE"))
+
+    date_start: Mapped[datetime] = mapped_column(DateTime)
+    date_end: Mapped[datetime] = mapped_column(DateTime)
+    price: Mapped[float] = mapped_column(Numeric(20, 2))
+
+    lot: Mapped["Lot"] = relationship("Lot", back_populates="price_schedules")
