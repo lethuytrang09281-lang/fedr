@@ -55,7 +55,7 @@ class Lot(Base):
     # Кадастровые номера (GIN индекс для поиска)
     cadastral_numbers: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
 
-    status: Mapped[LotStatus] = mapped_column(SAEnum(LotStatus), default=LotStatus.ANNOUNCED)
+    status: Mapped[str] = mapped_column(String(50), default=LotStatus.ANNOUNCED.value)
 
     auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")
     price_schedules: Mapped[List["PriceSchedule"]] = relationship("PriceSchedule", back_populates="lot", cascade="all, delete-orphan")

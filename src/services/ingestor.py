@@ -48,6 +48,14 @@ class IngestionService:
                 status_value = lot_data.get('status', LotStatus.ANNOUNCED.value)
                 if isinstance(status_value, LotStatus):
                     status_value = status_value.value
+                elif isinstance(status_value, str):
+                    # Если статус передан как строка, проверим, есть ли он в enum
+                    try:
+                        status_enum = LotStatus(status_value)
+                        status_value = status_enum.value
+                    except ValueError:
+                        # Если строка не соответствует enum, используем как есть
+                        pass
 
                 stmt_lot = insert(Lot).values(
                     auction_id=auction_dto['guid'],
@@ -56,7 +64,7 @@ class IngestionService:
                     start_price=lot_data['start_price'],
                     category_code=lot_data.get('category_code'),
                     cadastral_numbers=list(lot_data.get('cadastral_numbers') or []),
-                    status=status_value
+                    status=status_value if isinstance(status_value, str) else status_value.value
                 ).on_conflict_do_update(
                     # Теперь этот constraint существует в базе!
                     constraint='lots_auction_id_lot_number_key',
@@ -65,12 +73,12 @@ class IngestionService:
                         start_price=lot_data['start_price'],
                         category_code=lot_data.get('category_code'),
                         cadastral_numbers=list(lot_data.get('cadastral_numbers') or []),
-                        status=status_value
+                        status=status_value if isinstance(status_value, str) else status_value.value
                     )
                 ).returning(Lot.id)
 
                 result = await session.execute(stmt_lot)
-                lot_id = result.scalar_one_or_none()
+                lot_id = result.scalar_one()
 
                 # 4. Process Price Schedules (if any)
                 if lot_data.get('price_schedules'):

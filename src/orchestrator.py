@@ -214,7 +214,7 @@ class Orchestrator:
         message_dto = {
             "guid": msg_guid,
             "type": msg.get("type"),
-            "date_publish": date_pub,
+            "date_publish": date_pub.replace(tzinfo=None) if date_pub.tzinfo else date_pub,
             "content_xml": content_xml
         }
 
