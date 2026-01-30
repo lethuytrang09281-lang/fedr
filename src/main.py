@@ -12,7 +12,7 @@ logging.basicConfig(
 
 sys.path.insert(0, os.path.abspath('.'))
 
-from src.orchestrator import FedresursOrchestrator
+from src.orchestrator import Orchestrator
 from src.logic.price_calculator import PriceCalculator
 
 
@@ -24,7 +24,7 @@ async def main():
         print("Запуск Fedresurs Radar Orchestrator...")
 
         # Создаем новый оркестратор
-        orchestrator = FedresursOrchestrator()
+        orchestrator = Orchestrator()
 
         # Инициализация калькулятора цен
         price_calculator = PriceCalculator()

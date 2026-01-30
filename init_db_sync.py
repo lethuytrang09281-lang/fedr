@@ -9,7 +9,7 @@ from src.database.base import Base
 def init_db():
     # Используем синхронный движок для инициализации
     # Заменяем asyncpg на psycopg2 для синхронной работы
-    sync_db_url = settings.database_url.replace('postgresql+asyncpg://', 'postgresql://')
+    sync_db_url = settings.database_url.replace('postgresql+asyncpg://', 'postgresql+psycopg2://')
     engine = create_engine(sync_db_url)
 
     # Создаем все таблицы

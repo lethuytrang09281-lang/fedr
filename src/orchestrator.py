@@ -15,11 +15,11 @@ from src.config import Settings
 
 logger = logging.getLogger(__name__)
 
-class FedresursOrchestrator:
+class Orchestrator:
     def __init__(self):
         self.settings = Settings()
         self.client = EfrsbClient()
-        self.parser = XMLParserService()
+        self.xml_parser = XMLParserService()
         self.ingestor = IngestionService()
         self.price_calculator = PriceCalculator()
         # Нарезаем запросы по 1 дню для надежности
@@ -147,54 +147,66 @@ class FedresursOrchestrator:
             return
 
         # 1. Парсинг
-        lots = self.parser.parse_content(content_xml, msg_guid)
+        # Используем новый парсер, который возвращает кортеж (лоты, графики цен)
+        from src.services.xml_parser import XMLParserService
+        parser = XMLParserService()
+        lots_data, price_schedules_data = parser.parse_content(content_xml, msg_guid)
+
         lots_dicts = []
 
         # --- ФИЛЬТР КЛЮЧЕВЫХ СЛОВ (ОТКЛЮЧЕН для отладки) ---
         # Чтобы сохранялись ВСЕ сообщения, блок ниже закомментирован.
         # Если захочешь включить фильтр - раскомментируй строки.
-        
+
         # keywords = ["земельн", "участок", "мкд", "жилая", "застройка"]
         # found_keywords = False
-        # full_text = (content_xml + " ".join([l.description for l in lots])).lower()
+        # full_text = (content_xml + " ".join([l.description for l in lots_data])).lower()
         # for kw in keywords:
         #     if kw in full_text:
         #         found_keywords = True
         #         break
-        
+
         # if not found_keywords:
         #     return  # Пропускаем, если нет слов
         # ---------------------------------------------------
 
-        for lot in lots:
-            is_public = "PublicOffer" in (msg.get("type") or "") or lot.price_reduction_html
-            
+        for lot_data in lots_data:
+            is_public = "PublicOffer" in (msg.get("type") or "") or hasattr(lot_data, 'price_reduction_html') and lot_data.price_reduction_html
+
             if is_public:
                 current_price, schedules = self.price_calculator.calculate_current_price(
-                    lot.price_reduction_html, 
-                    lot.start_price
+                    lot_data.price_reduction_html if hasattr(lot_data, 'price_reduction_html') else "",
+                    lot_data.start_price
                 )
-                lot.start_price = current_price
-                lot.price_schedules = schedules
-            
-            lot_dict = lot.model_dump()
-            lot_dict.pop("price_reduction_html", None)
-            
+                lot_data.start_price = current_price
+                lot_data.price_schedules = schedules
+
+            # Создаем словарь лота
+            lot_dict = {
+                'lot_number': getattr(lot_data, 'lot_number', 1),
+                'description': lot_data.description,
+                'start_price': lot_data.start_price,
+                'category_code': lot_data.classifier_code,
+                'cadastral_numbers': lot_data.cadastral_numbers,
+                'status': getattr(lot_data, 'status', 'Announced')
+            }
+
             if "BiddingResult" in str(msg.get("type")):
                 lot_dict["status"] = "Sold"
             elif "BiddingFail" in str(msg.get("type")):
                 lot_dict["status"] = "Failed"
-            
+
             lots_dicts.append(lot_dict)
 
+        # Подготовка DTO для аукциона
         auction_info = msg.get("trade", {})
         auction_dto = {
-            "guid": auction_info.get("guid") or msg_guid,
-            "number": auction_info.get("number") or "UNKNOWN",
-            "etp_id": msg.get("tradePlaceGuid"),
-            "organizer_inn": None 
+            "guid": msg_guid,  # Используем guid сообщения как guid аукциона
+            "number": msg.get("number") or f"MSG_{msg_guid}",
+            "etp_id": msg.get("etpName"),  # Используем правильное поле
+            "organizer_inn": msg.get("organizerInn")  # Используем правильное поле
         }
-        
+
         # Убедимся, что дата публикации имеет временную зону
         if date_pub.tzinfo is None:
             date_pub = date_pub.replace(tzinfo=timezone.utc)
@@ -206,8 +218,8 @@ class FedresursOrchestrator:
             "content_xml": content_xml
         }
 
-        if lots_dicts:
-            await self.ingestor.save_parsed_data(session, auction_dto, lots_dicts, message_dto)
+        # Сохраняем данные
+        await self.ingestor.save_parsed_data(session, auction_dto, lots_dicts, message_dto)
 
     async def start_monitoring(self):
         logger.info("Starting Fedresurs Monitoring Service 🦅")
