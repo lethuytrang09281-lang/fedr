@@ -81,8 +81,8 @@ class IngestionService:
                     new_schedules = [
                         PriceSchedule(
                             lot_id=lot_id,
-                            date_start=sched['date_start'],
-                            date_end=sched['date_end'],
+                            date_start=sched['date_start'].replace(tzinfo=timezone.utc) if sched['date_start'].tzinfo is None else sched['date_start'],
+                            date_end=sched['date_end'].replace(tzinfo=timezone.utc) if sched['date_end'].tzinfo is None else sched['date_end'],
                             price=sched['price']
                         ) for sched in lot_data['price_schedules']
                     ]

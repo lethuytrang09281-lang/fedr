@@ -41,13 +41,37 @@ def test_xml_parsing():
     lots_data = parser.parse_content(sample_xml_bidding, "test-guid-1")
     print(f"Number of lots: {len(lots_data)}")
     for i, lot_data in enumerate(lots_data):
-        print(f"  Lot {i+1}: {lot_data.description[:50]}..., Price: {lot_data.start_price}, Classifier: {lot_data.classifier_code}")
+        if isinstance(lot_data, list):
+            # Если возвращается список, обрабатываем каждый элемент
+            for j, inner_lot_data in enumerate(lot_data):
+                if hasattr(inner_lot_data, 'description'):
+                    print(f"  Lot {i+1}.{j+1}: {inner_lot_data.description[:50]}..., Price: {inner_lot_data.start_price}, Classifier: {inner_lot_data.classifier_code}")
+                else:
+                    print(f"  Lot {i+1}.{j+1}: {inner_lot_data}")
+        else:
+            # Если возвращается объект напрямую
+            if hasattr(lot_data, 'description'):
+                print(f"  Lot {i+1}: {lot_data.description[:50]}..., Price: {lot_data.start_price}, Classifier: {lot_data.classifier_code}")
+            else:
+                print(f"  Lot {i+1}: {lot_data}")
 
     print("\nТестируем парсер XML для типа Auction2:")
     lots_data = parser.parse_content(sample_xml_auction, "test-guid-2")
     print(f"Number of lots: {len(lots_data)}")
     for i, lot_data in enumerate(lots_data):
-        print(f"  Lot {i+1}: {lot_data.description[:50]}..., Price: {lot_data.start_price}, Classifier: {lot_data.classifier_code}")
+        if isinstance(lot_data, list):
+            # Если возвращается список, обрабатываем каждый элемент
+            for j, inner_lot_data in enumerate(lot_data):
+                if hasattr(inner_lot_data, 'description'):
+                    print(f"  Lot {i+1}.{j+1}: {inner_lot_data.description[:50]}..., Price: {inner_lot_data.start_price}, Classifier: {inner_lot_data.classifier_code}")
+                else:
+                    print(f"  Lot {i+1}.{j+1}: {inner_lot_data}")
+        else:
+            # Если возвращается объект напрямую
+            if hasattr(lot_data, 'description'):
+                print(f"  Lot {i+1}: {lot_data.description[:50]}..., Price: {lot_data.start_price}, Classifier: {lot_data.classifier_code}")
+            else:
+                print(f"  Lot {i+1}: {lot_data}")
 
 
 if __name__ == "__main__":

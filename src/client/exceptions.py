@@ -3,6 +3,11 @@ class EfrsbException(Exception):
     pass
 
 
+class EfrsbError(EfrsbException):
+    """Исключение для ошибок API ЕФРСБ."""
+    pass
+
+
 class AuthenticationError(EfrsbException):
     """Исключение, возникающее при ошибке аутентификации."""
     pass

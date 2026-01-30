@@ -12,7 +12,7 @@ logging.basicConfig(
 
 sys.path.insert(0, os.path.abspath('.'))
 
-from src.orchestrator import orchestrator
+from src.orchestrator import FedresursOrchestrator
 from src.logic.price_calculator import PriceCalculator
 
 
@@ -23,18 +23,19 @@ async def main():
     try:
         print("Запуск Fedresurs Radar Orchestrator...")
 
+        # Создаем новый оркестратор
+        orchestrator = FedresursOrchestrator()
+
         # Инициализация калькулятора цен
         price_calculator = PriceCalculator()
 
-        # Запуск оркестратора
-        await orchestrator.start()
+        # Запуск мониторинга
+        await orchestrator.start_monitoring()
 
     except KeyboardInterrupt:
         print("Остановка orchestrator по сигналу пользователя...")
     except Exception as e:
         logging.error(f"Ошибка в основном цикле: {str(e)}")
-    finally:
-        await orchestrator.stop()
 
 
 def run_price_calculation_demo():

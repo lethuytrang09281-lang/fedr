@@ -1,319 +1,235 @@
 import asyncio
 import logging
-import re
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
-from concurrent.futures import ThreadPoolExecutor
-
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from src.client.api import EfrsbClient
+from src.client.exceptions import EfrsbError
 from src.services.xml_parser import XMLParserService
 from src.services.ingestor import IngestionService
-from src.config import settings
-from src.database.models import LotStatus
-from src.schemas import AuctionDTO, LotDTO, MessageDTO, PriceScheduleDTO
 from src.logic.price_calculator import PriceCalculator
-
+from src.database.base import get_db_session
+from src.database.models import SystemState
+from src.config import Settings
 
 logger = logging.getLogger(__name__)
 
-
-class Orchestrator:
-    """
-    Главный orchestrator для Fedresurs Radar.
-
-    Отвечает за:
-    1. Управление очередями задач
-    2. Реализация "скользящего окна" для обхода лимита в 31 день
-    3. Regex-фильтрация по ключевым словам (МКД, Земельные участки)
-    4. Система логирования и обработка ошибок API (429, 502)
-    5. Координация работы всех компонентов
-    """
-
+class FedresursOrchestrator:
     def __init__(self):
+        self.settings = Settings()
         self.client = EfrsbClient()
         self.parser = XMLParserService()
         self.ingestor = IngestionService()
         self.price_calculator = PriceCalculator()
-        self.engine = create_async_engine(settings.database_url)
-        self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
+        # Нарезаем запросы по 1 дню для надежности
+        self.chunk_size_days = 1 
 
-        # Regex-паттерны для фильтрации
-        self.municipal_patterns = [
-            re.compile(r'мкд', re.IGNORECASE),
-            re.compile(r'многоквартирный дом', re.IGNORECASE),
-            re.compile(r'жилой фонд', re.IGNORECASE),
-            re.compile(r'жилое помещение', re.IGNORECASE),
-            re.compile(r'дома на колесах', re.IGNORECASE),
-        ]
-
-        self.land_patterns = [
-            re.compile(r'зем(ельный)?\s*участ(ок|ка)', re.IGNORECASE),
-            re.compile(r'землепользование', re.IGNORECASE),
-            re.compile(r'с/х угодья', re.IGNORECASE),
-        ]
-
-        # Очередь задач
-        self.task_queue = asyncio.Queue()
-        self.running = False
-
-        # Executor для CPU-интенсивных задач (парсинг XML)
-        self.executor = ThreadPoolExecutor(max_workers=4)
-
-    async def start(self):
-        """Запуск orchestrator"""
-        logger.info("Starting Fedresurs Radar Orchestrator...")
-        self.running = True
-
-        # Запуск обработчиков задач
-        asyncio.create_task(self._process_tasks())
-
-        # Запуск основного цикла
-        await self._main_loop()
-
-    async def stop(self):
-        """Остановка orchestrator"""
-        logger.info("Stopping Fedresurs Radar Orchestrator...")
-        self.running = False
-        await self.client.close()
-        await self.engine.dispose()
-        self.executor.shutdown(wait=True)
-
-    async def _main_loop(self):
-        """Основной цикл работы orchestrator"""
-        while self.running:
+    async def get_last_processed_date(self, task_key: str, default_days_back: int = 30) -> datetime:
+        """
+        Возвращает дату последнего парсинга. Гарантированно возвращает aware-datetime (UTC).
+        """
+        default_date = datetime.now(timezone.utc) - timedelta(days=default_days_back)
+        
+        async for session in get_db_session():
             try:
-                # Выполняем сканирование с "скользящим окном"
-                await self._sliding_window_scan()
+                stmt = select(SystemState.last_processed_date).where(SystemState.task_key == task_key)
+                result = await session.execute(stmt)
+                db_date = result.scalar_one_or_none()
 
-                # Ждем перед следующим циклом (например, 1 час)
-                await asyncio.sleep(3600)
+                if db_date:
+                    # Если база вернула дату без зоны (naive), принудительно ставим UTC
+                    if db_date.tzinfo is None:
+                        db_date = db_date.replace(tzinfo=timezone.utc)
+                    return db_date
 
+                return default_date
             except Exception as e:
-                logger.error(f"Error in main loop: {str(e)}")
-                await asyncio.sleep(60)  # Пауза перед повторной попыткой
+                logger.error(f"Failed to get state: {e}")
+                return default_date
+            finally:
+                await session.close()
+                break
 
-    async def _sliding_window_scan(self):
-        """
-        Реализация "скользящего окна" для обхода лимита в 31 день.
+    async def update_state(self, task_key: str, new_date: datetime):
+        """Сохраняет прогресс в БД"""
+        async for session in get_db_session():
+            try:
+                stmt = insert(SystemState).values(
+                    task_key=task_key,
+                    last_processed_date=new_date
+                ).on_conflict_do_update(
+                    index_elements=['task_key'],
+                    set_={'last_processed_date': new_date}
+                )
+                await session.execute(stmt)
+                await session.commit()
+                logger.info(f"State updated: {task_key} -> {new_date}")
+            except Exception as e:
+                logger.error(f"Failed to update state: {e}")
+            finally:
+                await session.close()
+                break
 
-        Вместо запроса за 31 день за раз, разбиваем на меньшие интервалы
-        и выполняем последовательные запросы.
-        """
-        logger.info("Starting sliding window scan...")
-
-        # Определяем диапазон для сканирования (например, последние 90 дней)
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=90)
-
-        # Шаг в 7 дней (меньше лимита в 31 день)
-        step = timedelta(days=7)
+    async def run_sync_period(self, start_date: datetime, end_date: datetime):
+        """Проходит по периоду чанками"""
         current_start = start_date
+        
+        while current_start < end_date:
+            current_end = min(current_start + timedelta(days=self.chunk_size_days), end_date)
+            logger.info(f"Processing chunk: {current_start} -> {current_end}")
+            
+            offset = 0
+            limit = 50
+            
+            while True:
+                try:
+                    response = await self.client.get_trade_messages(
+                        date_start=current_start.strftime('%Y-%m-%d'),
+                        date_end=current_end.strftime('%Y-%m-%d'),
+                        offset=offset,
+                        limit=limit
+                    )
+                    
+                    messages = response.pageItems
+                    total = response.total
+                    
+                    if not messages:
+                        break
+                        
+                    async for session in get_db_session():
+                        try:
+                            for msg in messages:
+                                await self._process_single_message(session, msg)
+                        finally:
+                            await session.close()
+                            break
 
-        while current_start < end_date and self.running:
-            current_end = min(current_start + step, end_date)
+                    offset += limit
+                    if offset >= total:
+                        break
+                    
+                    await asyncio.sleep(0.2)
 
-            # Добавляем задачу в очередь
-            task = {
-                'type': 'scan_period',
-                'start_date': current_start.strftime('%Y-%m-%d'),
-                'end_date': current_end.strftime('%Y-%m-%d')
-            }
+                except EfrsbError as e:
+                    if "429" in str(e):
+                        logger.warning("Rate limit (429). Sleeping 60s...")
+                        await asyncio.sleep(60)
+                        continue 
+                    else:
+                        logger.error(f"API Error: {e}")
+                        raise e 
 
-            await self.task_queue.put(task)
-
+            await self.update_state("trade_monitor", current_end)
             current_start = current_end
 
-            # Небольшая задержка между задачами для соблюдения лимитов
-            await asyncio.sleep(2)
+    async def _process_single_message(self, session, msg: dict):
+        """Обработка одного сообщения"""
+        if msg.get("isAnnulled"):
+            return
 
-    async def _process_tasks(self):
-        """Обработка задач из очереди"""
-        while self.running:
-            try:
-                task = await self.task_queue.get()
-
-                if task['type'] == 'scan_period':
-                    await self._process_scan_task(task)
-
-                self.task_queue.task_done()
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error processing task {task}: {str(e)}")
-
-    async def _process_scan_task(self, task: Dict[str, Any]):
-        """Обработка задачи сканирования периода"""
-        start_date = task['start_date']
-        end_date = task['end_date']
-
-        logger.info(f"Processing scan task for period {start_date} to {end_date}")
-
+        msg_guid = msg.get("guid")
+        content_xml = msg.get("content")
+        
+        # Надежный парсинг даты с приведением к UTC
         try:
-            # Получаем сообщения за период
-            response = await self.client.search_messages(
-                date_start=start_date,
-                date_end=end_date,
-                limit=500  # Максимальный лимит за один запрос
-            )
-
-            logger.info(f"Received {response.total} messages for period {start_date} to {end_date}")
-
-            # Обрабатываем каждое сообщение
-            for message in response.pageItems:
-                await self._process_message(message)
-
-        except Exception as e:
-            if "429" in str(e) or "rate limit" in str(e).lower():
-                logger.warning(f"Rate limit exceeded for period {start_date} to {end_date}, retrying later")
-                # Возвращаем задачу в очередь с задержкой
-                await asyncio.sleep(60)
-                await self.task_queue.put(task)
-            elif "502" in str(e) or "bad gateway" in str(e).lower():
-                logger.error(f"Bad Gateway error for period {start_date} to {end_date}, skipping")
+            date_str = msg.get("datePublish")
+            if date_str:
+                # API иногда шлет 'Z', иногда '+03:00'. Приводим к ISO.
+                date_str = date_str.replace('Z', '+00:00')
+                date_pub = datetime.fromisoformat(date_str)
             else:
-                logger.error(f"Error processing scan task {start_date} to {end_date}: {str(e)}")
+                date_pub = datetime.now(timezone.utc)
+        except ValueError:
+            date_pub = datetime.now(timezone.utc)
 
-    async def _process_message(self, message):
-        """Обработка отдельного сообщения"""
-        try:
-            # Проверяем, содержит ли сообщение ключевые слова
-            if not self._matches_keywords(message.content):
-                logger.debug(f"Message {message.guid} does not match keywords, skipping")
-                return
+        if not content_xml:
+            return
 
-            logger.info(f"Processing message {message.guid} with type {message.type}")
+        # 1. Парсинг
+        lots = self.parser.parse_content(content_xml, msg_guid)
+        lots_dicts = []
 
-            # Парсим XML-контент (теперь возвращает лоты и графики цен)
-            lots_data, price_schedules = await asyncio.get_event_loop().run_in_executor(
-                self.executor,
-                self._parse_with_schedules,
-                message.content,
-                str(message.guid)
-            )
+        # --- ФИЛЬТР КЛЮЧЕВЫХ СЛОВ (ОТКЛЮЧЕН для отладки) ---
+        # Чтобы сохранялись ВСЕ сообщения, блок ниже закомментирован.
+        # Если захочешь включить фильтр - раскомментируй строки.
+        
+        # keywords = ["земельн", "участок", "мкд", "жилая", "застройка"]
+        # found_keywords = False
+        # full_text = (content_xml + " ".join([l.description for l in lots])).lower()
+        # for kw in keywords:
+        #     if kw in full_text:
+        #         found_keywords = True
+        #         break
+        
+        # if not found_keywords:
+        #     return  # Пропускаем, если нет слов
+        # ---------------------------------------------------
 
-            if not lots_data:
-                logger.info(f"No lots found in message {message.guid}")
-                return
-
-            # Фильтруем лоты по ключевым словам
-            filtered_lots = self._filter_lots_by_keywords(lots_data)
-
-            if not filtered_lots:
-                logger.info(f"No lots matched keywords in message {message.guid}")
-                return
-
-            # Подготовка DTO для сохранения
-            auction_dto = {
-                'guid': message.guid,
-                'number': message.number or f"MSG_{message.guid}",
-                'etp_id': getattr(message, 'etp_name', None),
-                'organizer_inn': getattr(message, 'organizer_inn', None)
-            }
-
-            lots_dto = []
-            for lot_data in filtered_lots:
-                lot_dto = {
-                    'lot_number': getattr(lot_data, 'lot_number', 1),
-                    'description': lot_data.description,
-                    'start_price': lot_data.start_price,
-                    'category_code': lot_data.classifier_code,
-                    'cadastral_numbers': lot_data.cadastral_numbers,
-                    'status': LotStatus.ANNOUNCED.value,  # Используем .value для enum
-                    'price_schedules': []  # Пока пустой, можно добавить из XML при необходимости
-                }
-                lots_dto.append(lot_dto)
-
-            message_dto = {
-                'guid': message.guid,
-                'type': message.type,
-                'date_publish': message.datePublish,
-                'content_xml': message.content
-            }
-
-            # Сохраняем данные в БД
-            async with self.SessionLocal() as session:
-                await self.ingestor.save_parsed_data(
-                    session=session,
-                    auction_dto=auction_dto,
-                    lots_dto=lots_dto,
-                    message_dto=message_dto
+        for lot in lots:
+            is_public = "PublicOffer" in (msg.get("type") or "") or lot.price_reduction_html
+            
+            if is_public:
+                current_price, schedules = self.price_calculator.calculate_current_price(
+                    lot.price_reduction_html, 
+                    lot.start_price
                 )
+                lot.start_price = current_price
+                lot.price_schedules = schedules
+            
+            lot_dict = lot.model_dump()
+            lot_dict.pop("price_reduction_html", None)
+            
+            if "BiddingResult" in str(msg.get("type")):
+                lot_dict["status"] = "Sold"
+            elif "BiddingFail" in str(msg.get("type")):
+                lot_dict["status"] = "Failed"
+            
+            lots_dicts.append(lot_dict)
 
-            # Обработка графиков цен (если есть)
-            if price_schedules:
-                await self._process_price_schedules(price_schedules)
+        auction_info = msg.get("trade", {})
+        auction_dto = {
+            "guid": auction_info.get("guid") or msg_guid,
+            "number": auction_info.get("number") or "UNKNOWN",
+            "etp_id": msg.get("tradePlaceGuid"),
+            "organizer_inn": None 
+        }
+        
+        # Убедимся, что дата публикации имеет временную зону
+        if date_pub.tzinfo is None:
+            date_pub = date_pub.replace(tzinfo=timezone.utc)
 
-            logger.info(f"Successfully processed message {message.guid} with {len(filtered_lots)} lots and {len(price_schedules)} price schedules")
+        message_dto = {
+            "guid": msg_guid,
+            "type": msg.get("type"),
+            "date_publish": date_pub,
+            "content_xml": content_xml
+        }
 
-        except Exception as e:
-            logger.error(f"Error processing message {message.guid}: {str(e)}")
+        if lots_dicts:
+            await self.ingestor.save_parsed_data(session, auction_dto, lots_dicts, message_dto)
 
-    def _matches_keywords(self, xml_content: str) -> bool:
-        """
-        Проверяет, содержит ли XML-контент ключевые слова (МКД, Земля и т.д.)
-        """
-        # Ищем в XML-контенте ключевые слова
-        for pattern in self.municipal_patterns + self.land_patterns:
-            if pattern.search(xml_content):
-                return True
-        return False
-
-    def _filter_lots_by_keywords(self, lots_data) -> List[Any]:
-        """
-        Фильтрует лоты по ключевым словам
-        """
-        filtered_lots = []
-
-        for lot_data in lots_data:
-            # Проверяем описание лота на наличие ключевых слов
-            description = lot_data.description.lower()
-
-            # Проверяем на МКД
-            for pattern in self.municipal_patterns:
-                if pattern.search(description):
-                    filtered_lots.append(lot_data)
-                    break
-
-            # Проверяем на землю
-            for pattern in self.land_patterns:
-                if pattern.search(description):
-                    if lot_data not in filtered_lots:  # Избегаем дубликатов
-                        filtered_lots.append(lot_data)
-                    break
-
-        return filtered_lots
-
-    def _parse_with_schedules(self, xml_content: str, message_guid: str):
-        """
-        Парсит XML-контент и возвращает лоты и графики цен
-        """
-        return self.parser.parse_content(xml_content, message_guid)
-
-    async def _process_price_schedules(self, price_schedules: List[PriceScheduleDTO]):
-        """
-        Обработка графиков цен
-        """
-        for schedule in price_schedules:
+    async def start_monitoring(self):
+        logger.info("Starting Fedresurs Monitoring Service 🦅")
+        while True:
             try:
-                # Рассчитываем текущую цену на основе графика
-                calculation_result = self.price_calculator.calculate_current_price(
-                    start_price=schedule.price,
-                    schedule_html=schedule.schedule_html,
-                    start_date=schedule.date_start
-                )
+                # Начинаем поиск с 30 дней назад
+                last_processed = await self.get_last_processed_date("trade_monitor", default_days_back=30)
+                now = datetime.now(timezone.utc)
 
-                logger.info(f"Calculated price for schedule {schedule.lot_id}: {calculation_result.current_price}, status: {calculation_result.schedule_status}")
+                if last_processed is None:
+                    # Если дата не найдена в базе, используем дату 30 дней назад
+                    last_processed = now - timedelta(days=30)
 
-                # Здесь можно добавить сохранение результатов расчета в базу данных
-                # или отправку в другую систему для дальнейшей обработки
+                if now - last_processed < timedelta(minutes=15):
+                    logger.info("All caught up. Sleep for 15 minutes... 💤")
+                    await asyncio.sleep(900)
+                    continue
 
+                logger.info(f"Resuming sync from {last_processed}")
+                await self.run_sync_period(last_processed, now)
+                
             except Exception as e:
-                logger.error(f"Error processing price schedule {schedule.lot_id}: {str(e)}")
-
-
-# Глобальный экземпляр orchestrator для удобства
-orchestrator = Orchestrator()
+                logger.error(f"Critical Orchestrator Error: {e}", exc_info=True)
+                logger.info("Restarting in 60s...")
+                await asyncio.sleep(60)

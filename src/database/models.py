@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -34,7 +34,7 @@ class Auction(Base):
     number: Mapped[Optional[str]] = mapped_column(String(100), index=True)
     etp_id: Mapped[Optional[str]] = mapped_column(String(255))
     organizer_inn: Mapped[Optional[str]] = mapped_column(String(20), index=True)
-    last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     lots: Mapped[List["Lot"]] = relationship("Lot", back_populates="auction", cascade="all, delete-orphan")
     messages: Mapped[List["MessageHistory"]] = relationship("MessageHistory", back_populates="auction")
@@ -72,7 +72,7 @@ class MessageHistory(Base):
     guid: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True)
     auction_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("auctions.guid"))
     type: Mapped[str] = mapped_column(String(100))
-    date_publish: Mapped[datetime] = mapped_column(DateTime, index=True)
+    date_publish: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     content_xml: Mapped[str] = mapped_column(Text)
 
     auction: Mapped["Auction"] = relationship("Auction", back_populates="messages")
@@ -84,8 +84,8 @@ class PriceSchedule(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     lot_id: Mapped[int] = mapped_column(ForeignKey("lots.id", ondelete="CASCADE"))
 
-    date_start: Mapped[datetime] = mapped_column(DateTime)
-    date_end: Mapped[datetime] = mapped_column(DateTime)
+    date_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    date_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     price: Mapped[float] = mapped_column(Numeric(20, 2))
 
     lot: Mapped["Lot"] = relationship("Lot", back_populates="price_schedules")
