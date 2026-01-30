@@ -245,3 +245,7 @@ class Orchestrator:
                 logger.error(f"Critical Orchestrator Error: {e}", exc_info=True)
                 logger.info("Restarting in 60s...")
                 await asyncio.sleep(60)
+
+
+# Глобальный экземпляр оркестратора для удобства
+orchestrator = Orchestrator()

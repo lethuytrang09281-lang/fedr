@@ -18,20 +18,22 @@ async def test_short_run():
     
     try:
         # Запуск оркестратора
-        await orchestrator.start()
-        
+        # Используем метод start_monitoring, который реализует основной цикл
+        task = asyncio.create_task(orchestrator.start_monitoring())
+
         # Работаем 30 секунд, затем останавливаем
         print("Ожидание получения и сохранения данных...")
         await asyncio.sleep(30)
-        
+
         print("Время истекло, останавливаем оркестратор...")
-        
+        task.cancel()
+
     except Exception as e:
         print(f"Ошибка в процессе работы: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        await orchestrator.stop()
+        await orchestrator.client.close()
 
 
 if __name__ == "__main__":
