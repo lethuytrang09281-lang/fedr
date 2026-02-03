@@ -31,6 +31,7 @@ services:
       - "8000:8000"
     volumes:
       - ./logs:/app/logs
+      - ./alembic/versions:/app/alembic/versions
 
 volumes:
   postgres_data:

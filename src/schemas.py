@@ -31,6 +31,7 @@ class LotData(BaseModel):
     message_guid: str
     classifier_code: str
     lot_number: int = 1  # Добавляем номер лота по умолчанию
+    is_restricted: bool = False  # Флаг скрытых данных (Постановление №5)
 
 
 class AuctionDTO(BaseModel):

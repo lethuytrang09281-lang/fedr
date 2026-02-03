@@ -138,6 +138,9 @@ class Orchestrator:
                 # API иногда шлет 'Z', иногда '+03:00'. Приводим к ISO.
                 date_str = date_str.replace('Z', '+00:00')
                 date_pub = datetime.fromisoformat(date_str)
+                # Если дата без часового пояса (naive), добавляем UTC
+                if date_pub.tzinfo is None:
+                    date_pub = date_pub.replace(tzinfo=timezone.utc)
             else:
                 date_pub = datetime.now(timezone.utc)
         except ValueError:
@@ -207,14 +210,17 @@ class Orchestrator:
             "organizer_inn": msg.get("organizerInn")  # Используем правильное поле
         }
 
-        # Убедимся, что дата публикации имеет временную зону
+        # Убедимся, что дата публикации имеет временную зону UTC
         if date_pub.tzinfo is None:
             date_pub = date_pub.replace(tzinfo=timezone.utc)
+        else:
+            # Конвертируем в UTC, если дата имеет другую временную зону
+            date_pub = date_pub.astimezone(timezone.utc)
 
         message_dto = {
             "guid": msg_guid,
             "type": msg.get("type"),
-            "date_publish": date_pub.replace(tzinfo=None) if date_pub.tzinfo else date_pub,
+            "date_publish": date_pub,
             "content_xml": content_xml
         }
 

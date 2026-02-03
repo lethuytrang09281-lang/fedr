@@ -1,24 +1,22 @@
 FROM python:3.11-slim
 
-# Установка системных зависимостей для lxml и netcat для проверки доступности БД
-RUN apt-get update && apt-get install -y \
-    libxml2-dev \
-    libxslt-dev \
-    gcc \
-    g++ \
-    netcat-openbsd \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
+# Установка системных зависимостей для lxml (парсинг XML) и psycopg2 (база данных)
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libxml2-dev \
+    libxslt-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
+# Флаг --no-cache-dir уменьшает размер образа
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Сделаем entrypoint исполняемым
-RUN chmod +x entrypoint.sh
+# Указываем Python путь, чтобы модули виделись корректно
+ENV PYTHONPATH=/app
 
-WORKDIR /app
-
-ENTRYPOINT ["./entrypoint.sh"]
+CMD ["python", "-m", "src.main"]

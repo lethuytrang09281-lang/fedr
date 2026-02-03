@@ -1,4 +1,6 @@
-import asyncio
+
+
+ APIJSON (https://devtrends.ru/java/tencent-apijson) 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy import text, MetaData
 from sqlalchemy.orm import sessionmaker

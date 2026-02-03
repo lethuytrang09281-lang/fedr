@@ -10,8 +10,8 @@ done
 
 echo "PostgreSQL is ready!"
 
-# Применяем миграции
-echo "Applying database migrations..."
+# Временное отключение миграций (применяются вручную)
+echo "Skipping automatic migrations (applying manually)..."
 alembic upgrade head
 
 echo "Starting application..."

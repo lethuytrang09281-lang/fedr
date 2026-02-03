@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Integer, Index, UniqueConstraint, Enum as SAEnum
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Integer, Index, UniqueConstraint, Enum as SAEnum, Boolean
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -24,7 +24,7 @@ class SystemState(Base):
     # Ключ задачи (например, 'trade_monitor')
     task_key: Mapped[str] = mapped_column(String(50), primary_key=True)
     # Дата, на которой остановился парсер
-    last_processed_date: Mapped[datetime] = mapped_column(DateTime)
+    last_processed_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class Auction(Base):
     """Торги (Основание для лотов)"""
@@ -56,6 +56,9 @@ class Lot(Base):
     cadastral_numbers: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
 
     status: Mapped[str] = mapped_column(String(50), default=LotStatus.ANNOUNCED.value)
+    
+    # Флаг для скрытых данных (Постановление №5)
+    is_restricted: Mapped[bool] = mapped_column(default=False)
 
     auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")
     price_schedules: Mapped[List["PriceSchedule"]] = relationship("PriceSchedule", back_populates="lot", cascade="all, delete-orphan")

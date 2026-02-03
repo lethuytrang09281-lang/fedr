@@ -14,7 +14,7 @@ def create_tables_sql():
     db_host = os.getenv('DB_HOST', 'localhost')
     db_port = int(os.getenv('DB_PORT', 5432))
     db_user = os.getenv('DB_USER', 'postgres')
-    db_password = os.getenv('DB_PASSWORD', 'quser')
+    db_password = os.getenv('DB_PASSWORD', 'password')
     db_name = os.getenv('DB_NAME', 'fedresurs_db')
     
     print(f"Создаем таблицы в базе данных {db_name}...")

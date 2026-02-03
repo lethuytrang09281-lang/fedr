@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, List, Tuple
 import re
 from bs4 import BeautifulSoup
 from src.schemas import PriceCalculationResult
@@ -9,6 +9,116 @@ class PriceCalculator:
     """
     Калькулятор цены на основе графика снижения цены
     """
+    
+    @staticmethod
+    def parse_public_offer_price(html_content: str) -> Optional[float]:
+        """
+        Парсинг графика цены (Публичное предложение)
+        Возвращает актуальную цену на текущую дату из HTML-таблицы в теге <PriceReduction>
+        
+        Алгоритм:
+        1. Используй BeautifulSoup для парсинга HTML
+        2. Найди таблицу
+        3. Пройдись по строкам
+        4. Найди интервал дат, в который попадает datetime.utcnow()
+        5. Верни цену из этого интервала
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Ищем таблицу с графиком снижения цены
+            table = soup.find('table')
+            if not table:
+                return None
+            
+            # Парсим строки таблицы
+            rows = table.find_all('tr')
+            if len(rows) < 2:  # заголовок + минимум одна строка
+                return None
+            
+            current_date = datetime.now(timezone.utc)
+            current_price = None
+            
+            for row in rows[1:]:  # пропускаем заголовок
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 3:  # ожидаем дата начала, дата окончания, цена
+                    try:
+                        # Парсим даты
+                        date_start_str = cells[0].get_text(strip=True)
+                        date_end_str = cells[1].get_text(strip=True)
+                        
+                        # Парсим даты (упрощенный парсинг)
+                        date_start = PriceCalculator._parse_date(date_start_str)
+                        date_end = PriceCalculator._parse_date(date_end_str)
+                        
+                        if date_start and date_end and date_start <= current_date <= date_end:
+                            price_str = cells[2].get_text(strip=True)
+                            # Очистка цены
+                            price_clean = re.sub(r'[^\d.,]', '', price_str)
+                            price_clean = price_clean.replace(',', '.')
+                            try:
+                                current_price = float(price_clean)
+                                break  # нашли текущий интервал
+                            except ValueError:
+                                continue
+                    except Exception:
+                        continue
+            
+            return current_price
+        except Exception as e:
+            # В случае ошибки парсинга возвращаем None
+            return None
+    
+    @staticmethod
+    def is_target_lot(description: str, classifier_code: str) -> bool:
+        """
+        Семантический фильтр (Земля и МКД)
+        Возвращает True, если лот соответствует целевым критериям
+        
+        Логика:
+        1. Проверяй коды классификатора: '0108001' (Земля), '0402006' (Право аренды), '0101014' (Недострой)
+        2. Если код подходит, ищи в описании ключевые слова (Regex): 
+           "многоквартирн*", "жилая застройка", "МКД", "высотная"
+        3. Исключай стоп-слова: "СНТ", "ЛПХ", "огород"
+        """
+        # Целевые коды классификатора
+        target_codes = {'0108001', '0402006', '0101014'}
+        
+        # Проверяем код классификатора
+        if classifier_code not in target_codes:
+            return False
+        
+        # Ищем ключевые слова в описании
+        description_lower = description.lower()
+        keywords = [
+            r"многоквартирн",
+            r"жилая застройка",
+            r"мкд",
+            r"высотная",
+            r"жилое здание",
+            r"многоквартирный дом"
+        ]
+        
+        # Проверяем наличие ключевых слов
+        has_keywords = any(re.search(keyword, description_lower) for keyword in keywords)
+        if not has_keywords:
+            return False
+        
+        # Исключаем стоп-слова
+        stop_words = ["снт", "лпх", "огород", "садовый", "дачный", "земли сельхозназначения"]
+        has_stop_words = any(stop_word in description_lower for stop_word in stop_words)
+        
+        return not has_stop_words
+    
+    @staticmethod
+    def detect_hidden_data(xml_content: str) -> bool:
+        """
+        Обработка "Скрытых данных" (Постановление №5)
+        Возвращает True, если в полях PublisherName или Participant встречается текст
+        "Сведения скрыты в соответствии с требованиями постановления Правительства РФ от 12.01.2018 г. №5"
+        """
+        hidden_text = "Сведения скрыты в соответствии с требованиями постановления Правительства РФ от 12.01.2018 г. №5"
+        return hidden_text in xml_content
     
     @staticmethod
     def calculate_current_price(
@@ -30,7 +140,7 @@ class PriceCalculator:
             PriceCalculationResult: Результат расчета цены
         """
         if current_date is None:
-            current_date = datetime.now()
+            current_date = datetime.now(timezone.utc)
         
         # Если нет графика, возвращаем начальную цену
         if not schedule_html:
@@ -137,13 +247,13 @@ class PriceCalculator:
     @staticmethod
     def _parse_date(date_str: str) -> Optional[datetime]:
         """
-        Парсит строку даты в объект datetime
+        Парсит строку даты в объект datetime с часовым поясом UTC
         
         Args:
             date_str: Строка даты
             
         Returns:
-            Объект datetime или None
+            Объект datetime (aware, UTC) или None
         """
         # Поддерживаемые форматы дат
         date_formats = [
@@ -160,7 +270,11 @@ class PriceCalculator:
         
         for fmt in date_formats:
             try:
-                return datetime.strptime(date_str, fmt)
+                dt = datetime.strptime(date_str, fmt)
+                # Добавляем часовой пояс UTC, если дата naive
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
             except ValueError:
                 continue
         
