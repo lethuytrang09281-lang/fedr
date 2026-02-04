@@ -9,3 +9,8 @@ async def init_db():
     # Таблицы создаются через Alembic, тут просто проверка коннекта
     async with engine.begin() as conn:
         pass
+
+async def get_session() -> AsyncSession:
+    """Dependency для FastAPI для получения сессии БД."""
+    async with AsyncSessionLocal() as session:
+        yield session
