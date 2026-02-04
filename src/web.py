@@ -1,6 +1,6 @@
 """
 Админ-панель для Fedresurs Pro.
-Временно отключаем парсер для отладки веб-интерфейса.
+Включает FastAPI + SQLAdmin для управления данными.
 """
 import asyncio
 from datetime import datetime, timezone
@@ -11,11 +11,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload
+from sqladmin import Admin, ModelView
 
 from src.core.logger import logger
-from src.database.session import get_session
+from src.database.session import get_session, engine
 from src.database.models import Auction, Lot, MessageHistory, SystemState, LotStatus
 from src.core.config import settings
+from src.services.orchestrator import orchestrator
 
 app = FastAPI(
     title="Fedresurs Pro Admin Panel",
@@ -32,25 +34,82 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Временно отключаем парсер для отладки
-async def run_parser_background():
-    """Фоновая задача парсера - временно отключена для отладки"""
-    logger.info("🚫 Парсер временно отключен для отладки админ-панели.")
-    # await main_loop()  # Закомментировано по требованию
-    # Вместо этого просто спим, чтобы не мешать
-    while True:
-        logger.debug("💓 Система жива (парсер отключен)")
-        await asyncio.sleep(60)
+# SQLAdmin интеграция
+admin = Admin(app, engine, title="Fedresurs Pro Admin")
+
+
+# Admin Views для моделей
+class AuctionAdmin(ModelView, model=Auction):
+    """Административная панель для торгов"""
+    column_list = [Auction.guid, Auction.number, Auction.etp_id, Auction.organizer_inn, Auction.last_updated]
+    column_searchable_list = [Auction.number, Auction.organizer_inn]
+    column_sortable_list = [Auction.number, Auction.last_updated]
+    column_default_sort = [(Auction.last_updated, True)]
+    can_create = False  # Только чтение (создаются парсером)
+    can_edit = True
+    can_delete = True
+    page_size = 50
+
+
+class LotAdmin(ModelView, model=Lot):
+    """Административная панель для лотов"""
+    column_list = [
+        Lot.id, Lot.lot_number, Lot.description, Lot.start_price,
+        Lot.status, Lot.category_code, Lot.is_restricted
+    ]
+    column_searchable_list = [Lot.description, Lot.category_code]
+    column_sortable_list = [Lot.id, Lot.start_price, Lot.status]
+    column_filters = [Lot.status, Lot.category_code, Lot.is_restricted]
+    column_default_sort = [(Lot.id, True)]
+    can_create = False
+    can_edit = True
+    can_delete = True
+    page_size = 100
+
+
+class MessageHistoryAdmin(ModelView, model=MessageHistory):
+    """Административная панель для истории сообщений"""
+    column_list = [MessageHistory.guid, MessageHistory.type, MessageHistory.date_publish]
+    column_searchable_list = [MessageHistory.type]
+    column_sortable_list = [MessageHistory.date_publish]
+    column_default_sort = [(MessageHistory.date_publish, True)]
+    can_create = False
+    can_edit = False
+    can_delete = True
+    page_size = 50
+
+
+class SystemStateAdmin(ModelView, model=SystemState):
+    """Административная панель для системного состояния"""
+    column_list = [SystemState.task_key, SystemState.last_processed_date]
+    can_create = True
+    can_edit = True
+    can_delete = True
+
+
+# Регистрация админ-панелей
+admin.add_view(AuctionAdmin)
+admin.add_view(LotAdmin)
+admin.add_view(MessageHistoryAdmin)
+admin.add_view(SystemStateAdmin)
 
 @app.on_event("startup")
 async def startup_event():
     """Действия при старте приложения"""
     logger.info("🚀 Запуск админ-панели Fedresurs Pro...")
-    
-    # Запускаем отключенный парсер в фоне
-    asyncio.create_task(run_parser_background())
-    
-    logger.info("✅ Админ-панель запущена. Парсер временно отключен.")
+
+    # Запускаем оркестратор в фоновом режиме
+    asyncio.create_task(orchestrator.start_monitoring())
+
+    logger.info("✅ Админ-панель запущена. Оркестратор работает в фоне.")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Действия при остановке приложения"""
+    logger.info("🛑 Остановка админ-панели...")
+    await orchestrator.stop()
+    logger.info("✅ Приложение остановлено.")
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -68,15 +127,21 @@ async def root():
             .endpoint { background: #e9ecef; padding: 10px; border-radius: 4px; font-family: monospace; }
             a { color: #007bff; text-decoration: none; }
             a:hover { text-decoration: underline; }
+            .admin-link { background: #28a745; color: white; padding: 15px 30px;
+                         border-radius: 8px; font-size: 18px; font-weight: bold;
+                         display: inline-block; margin: 20px 0; }
+            .admin-link:hover { background: #218838; }
         </style>
     </head>
     <body>
         <h1>🚀 Fedresurs Pro Admin Panel</h1>
         <div class="card">
             <h2>📊 Система мониторинга торгов</h2>
-            <p>Парсер временно отключен для отладки админ-панели.</p>
-            <p>Используйте следующие эндпоинты для работы с данными:</p>
+            <p>Оркестратор парсинга активен (SIMULATION MODE).</p>
+            <a href="/admin" class="admin-link">🎛️ Открыть Админ-Панель SQLAdmin</a>
+            <p>Доступные эндпоинты:</p>
             <ul>
+                <li><a href="/admin">🎛️ Админ-панель SQLAdmin</a></li>
                 <li><a href="/docs">📚 Swagger UI документация</a></li>
                 <li><a href="/redoc">📖 ReDoc документация</a></li>
                 <li><a href="/api/health">🩺 Проверка здоровья системы</a></li>
@@ -86,9 +151,9 @@ async def root():
             </ul>
         </div>
         <div class="card">
-            <h3>Примеры запросов:</h3>
+            <h3>Примеры API запросов:</h3>
             <div class="endpoint">GET /api/auctions?limit=10&offset=0</div>
-            <div class="endpoint">GET /api/lots?status=Active&min_price=1000000</div>
+            <div class="endpoint">GET /api/lots?status=Announced&min_price=1000000</div>
             <div class="endpoint">GET /api/stats</div>
         </div>
     </body>
@@ -114,7 +179,10 @@ async def health_check(session: AsyncSession = Depends(get_session)):
                 "auctions": auction_count,
                 "lots": lot_count
             },
-            "parser": "temporarily_disabled"
+            "orchestrator": {
+                "status": "running" if orchestrator.is_running else "stopped",
+                "mode": "simulation" if not settings.CHECKO_API_KEY else "production"
+            }
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -277,7 +345,8 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
                 "last_auction_number": last_auction.number if last_auction else None
             },
             "system": {
-                "parser_status": "temporarily_disabled",
+                "orchestrator_status": "running" if orchestrator.is_running else "stopped",
+                "orchestrator_mode": "simulation" if not settings.CHECKO_API_KEY else "production",
                 "database": "connected",
                 "environment": settings.APP_ENV
             }

@@ -23,3 +23,9 @@ loguru==0.7.2
 # Веб-фреймворк для админ-панели
 fastapi==0.108.0
 uvicorn[standard]==0.25.0
+sqladmin==0.16.0
+itsdangerous==2.1.2
+python-multipart==0.0.6
+
+# Retry механизм
+tenacity==8.2.3
