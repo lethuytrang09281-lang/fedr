@@ -1,13 +1,15 @@
 """
 Админ-панель для Fedresurs Pro.
-Включает FastAPI + SQLAdmin для управления данными.
+Включает FastAPI + SQLAdmin для управления данными + красивый Dashboard.
 """
 import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
+from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload
@@ -111,54 +113,21 @@ async def shutdown_event():
     await orchestrator.stop()
     logger.info("✅ Приложение остановлено.")
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def root():
-    """Корневая страница с информацией о системе"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Fedresurs Pro Admin Panel</title>
-        <meta charset="utf-8">
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            h1 { color: #333; }
-            .card { background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0; }
-            .endpoint { background: #e9ecef; padding: 10px; border-radius: 4px; font-family: monospace; }
-            a { color: #007bff; text-decoration: none; }
-            a:hover { text-decoration: underline; }
-            .admin-link { background: #28a745; color: white; padding: 15px 30px;
-                         border-radius: 8px; font-size: 18px; font-weight: bold;
-                         display: inline-block; margin: 20px 0; }
-            .admin-link:hover { background: #218838; }
-        </style>
-    </head>
-    <body>
-        <h1>🚀 Fedresurs Pro Admin Panel</h1>
-        <div class="card">
-            <h2>📊 Система мониторинга торгов</h2>
-            <p>Оркестратор парсинга активен (SIMULATION MODE).</p>
-            <a href="/admin" class="admin-link">🎛️ Открыть Админ-Панель SQLAdmin</a>
-            <p>Доступные эндпоинты:</p>
-            <ul>
-                <li><a href="/admin">🎛️ Админ-панель SQLAdmin</a></li>
-                <li><a href="/docs">📚 Swagger UI документация</a></li>
-                <li><a href="/redoc">📖 ReDoc документация</a></li>
-                <li><a href="/api/health">🩺 Проверка здоровья системы</a></li>
-                <li><a href="/api/auctions">🏛️ Список торгов</a></li>
-                <li><a href="/api/lots">📦 Список лотов</a></li>
-                <li><a href="/api/stats">📈 Статистика</a></li>
-            </ul>
-        </div>
-        <div class="card">
-            <h3>Примеры API запросов:</h3>
-            <div class="endpoint">GET /api/auctions?limit=10&offset=0</div>
-            <div class="endpoint">GET /api/lots?status=Announced&min_price=1000000</div>
-            <div class="endpoint">GET /api/stats</div>
-        </div>
-    </body>
-    </html>
-    """
+    """Redirect to dashboard"""
+    return RedirectResponse(url="/dashboard")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Красивая панель управления с real-time мониторингом"""
+    dashboard_path = Path(__file__).parent / "static" / "dashboard.html"
+
+    if not dashboard_path.exists():
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+
+    with open(dashboard_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 @app.get("/api/health")
 async def health_check(session: AsyncSession = Depends(get_session)):
@@ -233,6 +202,97 @@ async def get_auctions(
         logger.error(f"Error fetching auctions: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
+@app.get("/api/lots/filter")
+async def filter_lots(
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    zone: Optional[str] = Query(None, description="Фильтр по зоне: GARDEN_RING, TTK, TPU, OUTSIDE"),
+    is_relevant: Optional[bool] = Query(None, description="Только релевантные лоты"),
+    tags: Optional[str] = Query(None, description="Теги через запятую (например: мкд,офисный_центр)"),
+    exclude_red_flags: Optional[bool] = Query(False, description="Исключить лоты с красными флагами"),
+    min_price: Optional[float] = Query(None, ge=0),
+    max_price: Optional[float] = Query(None, ge=0)
+):
+    """
+    Фильтрация лотов по критериям классификации (Sprint 1).
+
+    Примеры:
+    - /api/lots/filter?zone=GARDEN_RING&is_relevant=true
+    - /api/lots/filter?tags=мкд,офисный_центр&exclude_red_flags=true
+    - /api/lots/filter?is_relevant=true&min_price=1000000
+    """
+    try:
+        query = select(Lot).join(Auction).order_by(desc(Lot.id))
+
+        # Фильтр по зоне
+        if zone:
+            query = query.where(Lot.location_zone == zone)
+
+        # Фильтр по релевантности
+        if is_relevant is not None:
+            query = query.where(Lot.is_relevant == is_relevant)
+
+        # Фильтр по тегам (поддержка нескольких через запятую)
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",")]
+            # Ищем лоты, у которых есть хотя бы один из указанных тегов
+            query = query.where(Lot.semantic_tags.overlap(tag_list))
+
+        # Исключение лотов с красными флагами
+        if exclude_red_flags:
+            query = query.where(Lot.red_flags == [])
+
+        # Фильтр по цене
+        if min_price is not None:
+            query = query.where(Lot.start_price >= min_price)
+
+        if max_price is not None:
+            query = query.where(Lot.start_price <= max_price)
+
+        # Применяем пагинацию
+        query = query.offset(offset).limit(limit).options(
+            selectinload(Lot.auction),
+            selectinload(Lot.price_schedules)
+        )
+
+        result = await session.execute(query)
+        lots = result.scalars().all()
+
+        return {
+            "lots": [
+                {
+                    "id": lot.id,
+                    "guid": str(lot.guid) if lot.guid else None,
+                    "auction_id": str(lot.auction_id),
+                    "auction_number": lot.auction.number if lot.auction else None,
+                    "lot_number": lot.lot_number,
+                    "description": lot.description[:200] + "..." if len(lot.description) > 200 else lot.description,
+                    "start_price": float(lot.start_price) if lot.start_price else None,
+                    "status": lot.status,
+                    "category_code": lot.category_code,
+                    "cadastral_numbers": lot.cadastral_numbers,
+                    "is_restricted": lot.is_restricted,
+                    # Поля классификации (Sprint 1)
+                    "location_zone": lot.location_zone,
+                    "is_relevant": lot.is_relevant,
+                    "semantic_tags": lot.semantic_tags,
+                    "red_flags": lot.red_flags,
+                    "needs_enrichment": lot.needs_enrichment,
+                    "created_at": lot.auction.last_updated.isoformat() if lot.auction and lot.auction.last_updated else None
+                }
+                for lot in lots
+            ],
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": len(lots)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error filtering lots: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
 @app.get("/api/lots")
 async def get_lots(
     session: AsyncSession = Depends(get_session),
@@ -288,6 +348,12 @@ async def get_lots(
                     "category_code": lot.category_code,
                     "cadastral_numbers": lot.cadastral_numbers,
                     "is_restricted": lot.is_restricted,
+                    # Поля классификации (Sprint 1)
+                    "location_zone": getattr(lot, "location_zone", "OUTSIDE"),
+                    "is_relevant": getattr(lot, "is_relevant", False),
+                    "semantic_tags": getattr(lot, "semantic_tags", []),
+                    "red_flags": getattr(lot, "red_flags", []),
+                    "needs_enrichment": getattr(lot, "needs_enrichment", False),
                     "created_at": lot.auction.last_updated.isoformat() if lot.auction and lot.auction.last_updated else None
                 }
                 for lot in lots
@@ -403,6 +469,61 @@ async def get_auction_detail(
         }
     except Exception as e:
         logger.error(f"Error fetching auction detail: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.get("/api/orchestrator/status")
+async def get_orchestrator_status(session: AsyncSession = Depends(get_session)):
+    """Получить детальный статус оркестратора с реальными метриками"""
+    try:
+        # Получаем состояние из базы данных
+        state_query = select(SystemState).where(SystemState.task_key == "trade_monitor")
+        result = await session.execute(state_query)
+        state = result.scalar_one_or_none()
+
+        # Получаем последние сообщения
+        recent_messages_query = (
+            select(MessageHistory)
+            .order_by(desc(MessageHistory.date_publish))
+            .limit(10)
+        )
+        result = await session.execute(recent_messages_query)
+        recent_messages = result.scalars().all()
+
+        # Вычисляем разницу между текущей датой и последней обработанной
+        now = datetime.now(timezone.utc)
+        if state and state.last_processed_date:
+            time_behind = (now - state.last_processed_date).total_seconds()
+            days_behind = time_behind / 86400  # секунды в днях
+        else:
+            time_behind = 0
+            days_behind = 0
+
+        return {
+            "timestamp": now.isoformat(),
+            "orchestrator": {
+                "is_running": orchestrator.is_running,
+                "mode": "production" if settings.CHECKO_API_KEY else "simulation",
+                "last_processed_date": state.last_processed_date.isoformat() if state and state.last_processed_date else None,
+                "current_date": now.isoformat(),
+                "time_behind_seconds": round(time_behind),
+                "days_behind": round(days_behind, 2),
+            },
+            "recent_activity": [
+                {
+                    "guid": str(msg.guid),
+                    "type": msg.type,
+                    "date_publish": msg.date_publish.isoformat() if msg.date_publish else None,
+                    "auction_id": str(msg.auction_id) if msg.auction_id else None
+                }
+                for msg in recent_messages
+            ],
+            "api": {
+                "base_url": settings.EFRSB_BASE_URL,
+                "login": settings.EFRSB_LOGIN,
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching orchestrator status: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 if __name__ == "__main__":

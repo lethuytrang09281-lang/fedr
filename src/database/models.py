@@ -17,6 +17,13 @@ class LotStatus(enum.Enum):
     SOLD = "Sold"
     CANCELLED = "Cancelled"
 
+class LocationZone(enum.Enum):
+    """Гео-зоны Москвы по приоритету"""
+    GARDEN_RING = "GARDEN_RING"   # Внутри Садового кольца (приоритет 1)
+    TTK = "TTK"                    # Между Садовым и ТТК (приоритет 2)
+    TPU = "TPU"                    # Зоны транспортно-пересадочных узлов
+    OUTSIDE = "OUTSIDE"            # Всё остальное
+
 class SystemState(Base):
     """Таблица для хранения состояния системы (прогресс парсинга)"""
     __tablename__ = "system_state"
@@ -56,9 +63,21 @@ class Lot(Base):
     cadastral_numbers: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
 
     status: Mapped[str] = mapped_column(String(50), default=LotStatus.ANNOUNCED.value)
-    
+
     # Флаг для скрытых данных (Постановление №5)
     is_restricted: Mapped[bool] = mapped_column(default=False)
+
+    # === СПРИНТ 1: Гео-зонирование и классификация ===
+    location_zone: Mapped[str] = mapped_column(String(20), default=LocationZone.OUTSIDE.value, index=True)
+    is_relevant: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    semantic_tags: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
+    red_flags: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
+
+    # === СПРИНТ 2: Обогащение через Росреестр ===
+    rosreestr_area: Mapped[Optional[float]] = mapped_column(Numeric(15, 2), nullable=True)
+    rosreestr_value: Mapped[Optional[float]] = mapped_column(Numeric(20, 2), nullable=True)
+    rosreestr_vri: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    needs_enrichment: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
     auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")
     price_schedules: Mapped[List["PriceSchedule"]] = relationship("PriceSchedule", back_populates="lot", cascade="all, delete-orphan")

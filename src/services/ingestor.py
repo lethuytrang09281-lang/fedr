@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from src.database.models import Auction, Lot, MessageHistory, LotStatus
 from src.services.notifier import TelegramNotifier
-from src.services.classifier import SemanticFilter
+from src.services.classifier import SemanticClassifier
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 class IngestionService:
     def __init__(self):
         self.notifier = TelegramNotifier()
-        self.classifier = SemanticFilter()
+        # Используем новый классификатор (Sprint 1)
+        self.classifier = SemanticClassifier
 
     async def save_parsed_data(self, session: AsyncSession, auction_dto: dict, lots_dto: list, message_dto: dict):
         try:
@@ -57,7 +58,13 @@ class IngestionService:
                         description=lot_data['description'],
                         start_price=lot_data['start_price'],
                         status=lot_data.get('status', LotStatus.ANNOUNCED),
-                        cadastral_numbers=lot_data.get('cadastral_numbers', [])
+                        cadastral_numbers=lot_data.get('cadastral_numbers', []),
+                        # Поля классификации (Sprint 1)
+                        location_zone=lot_data.get('location_zone', 'OUTSIDE'),
+                        is_relevant=lot_data.get('is_relevant', False),
+                        semantic_tags=lot_data.get('semantic_tags', []),
+                        red_flags=lot_data.get('red_flags', []),
+                        needs_enrichment=lot_data.get('needs_enrichment', False)
                     )
                 ).returning(Lot)
                 
@@ -73,15 +80,19 @@ class IngestionService:
                 is_newly_created = time_since_creation.total_seconds() < 60
 
                 if is_newly_created:
-                    analysis = self.classifier.analyze(saved_lot)
+                    # Используем уже классифицированные данные из lot_data
+                    is_relevant = lot_data.get('is_relevant', False)
+                    semantic_tags = lot_data.get('semantic_tags', [])
+                    zone = lot_data.get('location_zone', 'OUTSIDE')
 
-                    if analysis["is_interesting"]:
-                        tags_str = ", ".join(analysis["tags"])
-                        logger.info(f"🎯 Matched Rules: {analysis['matched_rules']} | Score: {analysis['total_score']}")
-                        
+                    # Отправляем уведомление если лот релевантен
+                    if is_relevant:
+                        tags_str = ", ".join(semantic_tags)
+                        logger.info(f"🎯 Relevant lot found! Zone: {zone} | Tags: {tags_str}")
+
                         await self.notifier.send_lot_alert(
-                            lot=saved_lot, 
-                            auction_number=auction_number, 
+                            lot=saved_lot,
+                            auction_number=auction_number,
                             trade_place_name=platform_name,
                             tags=tags_str
                         )

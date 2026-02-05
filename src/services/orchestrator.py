@@ -18,6 +18,8 @@ from src.database.models import SystemState, Auction, Lot, LotStatus, MessageHis
 from src.api.client import FedresursClient
 from src.services.xml_parser import XMLParserService
 from src.services.ingestor import IngestionService
+from src.services.zone_service import MoscowZoneService
+from src.services.classifier import SemanticClassifier
 
 
 class Orchestrator:
@@ -243,16 +245,32 @@ class Orchestrator:
                 "content_xml": content_xml
             }
 
-            # Преобразуем распарсенные лоты в формат для Ingestor
+            # Преобразуем распарсенные лоты в формат для Ingestor + классификация
             lots_dicts = []
             for lot_data in lots_data:
+                # 1. Определяем гео-зону по кадастровым номерам
+                cadastral_numbers = lot_data.cadastral_numbers or []
+                location_zone = MoscowZoneService.determine_zone(cadastral_numbers)
+
+                # 2. Семантическая классификация (целевые теги, мусор, красные флаги)
+                classification = SemanticClassifier.classify(
+                    description=lot_data.description,
+                    category_code=lot_data.classifier_code
+                )
+
                 lots_dicts.append({
                     "lot_number": getattr(lot_data, "lot_number", 1),
                     "description": lot_data.description,
                     "start_price": lot_data.start_price,
                     "category_code": lot_data.classifier_code,
-                    "cadastral_numbers": lot_data.cadastral_numbers or [],
-                    "status": "Active"
+                    "cadastral_numbers": cadastral_numbers,
+                    "status": "Active",
+                    # Новые поля классификации (Sprint 1)
+                    "location_zone": location_zone,
+                    "is_relevant": classification.is_relevant,
+                    "semantic_tags": classification.semantic_tags,
+                    "red_flags": classification.red_flags,
+                    "needs_enrichment": len(cadastral_numbers) > 0,  # Если есть кадастры - можно обогатить
                 })
 
             # Сохранение в БД через Ingestor
