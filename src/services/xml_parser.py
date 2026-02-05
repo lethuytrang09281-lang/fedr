@@ -1,7 +1,7 @@
 from typing import List, Tuple, Optional
 from lxml import etree
 from src.database.models import Lot
-from src.schemas import LotData, PriceScheduleDTO
+from src.parser.schemas import LotData, PriceScheduleDTO
 from datetime import datetime, timezone
 import logging
 import re
