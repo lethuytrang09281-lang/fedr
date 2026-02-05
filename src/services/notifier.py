@@ -2,7 +2,7 @@ import httpx
 import logging
 from typing import Optional, List
 from src.database.models import Lot
-from src.config import settings
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from src.database.models import Auction, Lot, MessageHistory, LotStatus
 from src.services.notifier import TelegramNotifier
 from src.services.classifier import SemanticFilter
-from src.config import settings
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
