@@ -5,7 +5,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import select
 
 from src.database.models import Auction, Lot, MessageHistory, LotStatus
-from src.services.notifier import TelegramNotifier
+from src.bot.notifier import TelegramNotifier
+from src.services.enricher import RosreestrEnricher
 from src.services.classifier import SemanticClassifier
 from src.core.config import settings
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 class IngestionService:
     def __init__(self):
         self.notifier = TelegramNotifier()
+        self.enricher = RosreestrEnricher()
         # Используем новый классификатор (Sprint 1)
         self.classifier = SemanticClassifier
 
@@ -90,12 +92,24 @@ class IngestionService:
                         tags_str = ", ".join(semantic_tags)
                         logger.info(f"🎯 Relevant lot found! Zone: {zone} | Tags: {tags_str}")
 
-                        await self.notifier.send_lot_alert(
-                            lot=saved_lot,
-                            auction_number=auction_number,
-                            trade_place_name=platform_name,
-                            tags=tags_str
-                        )
+                        # Обогащаем данными из Росреестра (если есть кадастры)
+                        if zone in ('GARDEN_RING', 'TTK') and saved_lot.cadastral_numbers:
+                            try:
+                                await self.enricher.enrich_lot(saved_lot.id, session)
+                                await session.refresh(saved_lot)
+                            except Exception as e:
+                                logger.warning(f"Enrichment failed for lot {saved_lot.id}: {e}")
+
+                        await self.notifier.send_lot_alert({
+                            'guid': str(saved_lot.auction_id),
+                            'description': saved_lot.description,
+                            'start_price': float(saved_lot.start_price) if saved_lot.start_price else 0,
+                            'location_zone': zone,
+                            'cadastral_numbers': saved_lot.cadastral_numbers or [],
+                            'semantic_tags': semantic_tags,
+                            'red_flags': lot_data.get('red_flags', []),
+                            'rosreestr_area': float(saved_lot.rosreestr_area) if saved_lot.rosreestr_area else None,
+                        })
 
             await session.commit()
             logger.info(f"✅ Ingested auction {auction_dto['guid']} ({len(lots_dto)} lots)")

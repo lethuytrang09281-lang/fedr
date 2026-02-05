@@ -29,3 +29,9 @@ python-multipart==0.0.6
 
 # Retry механизм
 tenacity==8.2.3
+
+# Telegram Bot
+aiogram>=3.4.0
+
+# Росреестр API
+rosreestr-api>=1.0.0

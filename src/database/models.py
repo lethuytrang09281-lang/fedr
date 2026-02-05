@@ -77,6 +77,7 @@ class Lot(Base):
     rosreestr_area: Mapped[Optional[float]] = mapped_column(Numeric(15, 2), nullable=True)
     rosreestr_value: Mapped[Optional[float]] = mapped_column(Numeric(20, 2), nullable=True)
     rosreestr_vri: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    rosreestr_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     needs_enrichment: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
     auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")

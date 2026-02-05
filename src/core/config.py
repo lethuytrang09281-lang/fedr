@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_CHAT_ID: Optional[str] = None
     CHECKO_API_KEY: Optional[str] = None
+    PARSER_API_KEY: Optional[str] = None
 
     # EFRSB API Configuration
     EFRSB_BASE_URL: str = "https://bank-publications-demo.fedresurs.ru"
