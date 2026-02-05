@@ -392,19 +392,37 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
         result = await session.execute(cadastral_query)
         lots_with_cadastral = result.scalar()
         
+        # Статистика по зонам
+        zone_query = select(Lot.location_zone, func.count(Lot.location_zone)).group_by(Lot.location_zone)
+        result = await session.execute(zone_query)
+        zone_stats = {row[0]: row[1] for row in result.all()}
+
+        # Целевые лоты (is_relevant=true)
+        target_query = select(func.count()).select_from(Lot).where(Lot.is_relevant == True)
+        result = await session.execute(target_query)
+        target_count = result.scalar()
+
+        # Лоты с red_flags
+        red_flags_query = select(func.count()).select_from(Lot).where(Lot.red_flags != [])
+        result = await session.execute(red_flags_query)
+        red_flags_count = result.scalar()
+
         # Последние обновления
         last_auction_query = select(Auction).order_by(desc(Auction.last_updated)).limit(1)
         result = await session.execute(last_auction_query)
         last_auction = result.scalar_one_or_none()
-        
+
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "counts": {
                 "auctions": auction_count,
                 "lots": lot_count,
                 "lots_with_cadastral": lots_with_cadastral,
-                "lots_without_cadastral": lot_count - lots_with_cadastral
+                "lots_without_cadastral": lot_count - lots_with_cadastral,
+                "target_lots": target_count,
+                "red_flags_lots": red_flags_count
             },
+            "zone_distribution": zone_stats,
             "status_distribution": status_stats,
             "recent_activity": {
                 "last_auction_time": last_auction.last_updated.isoformat() if last_auction else None,

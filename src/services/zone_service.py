@@ -59,15 +59,15 @@ class MoscowZoneService:
             if len(parts) < 3:
                 continue
 
-            # Формируем префикс квартала (77:01:0001)
+            # Формируем префикс квартала (77:01:0001001)
             prefix = f"{parts[0]}:{parts[1]}:{parts[2]}"
 
-            # Приоритет 1: Садовое кольцо
-            if prefix in cls.GARDEN_RING_PREFIXES:
+            # Приоритет 1: Садовое кольцо (проверяем начало квартала)
+            if any(prefix.startswith(p) for p in cls.GARDEN_RING_PREFIXES):
                 return LocationZone.GARDEN_RING.value
 
             # Приоритет 2: ТПУ
-            if prefix in cls.TPU_QUARTERS:
+            if any(prefix.startswith(p) for p in cls.TPU_QUARTERS) if cls.TPU_QUARTERS else False:
                 return LocationZone.TPU.value
 
             # Приоритет 3: ТТК (остальной ЦАО)
