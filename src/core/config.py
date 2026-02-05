@@ -9,7 +9,12 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_CHAT_ID: Optional[str] = None
     CHECKO_API_KEY: Optional[str] = None
-    EFRSB_BASE_URL: str = "https://fedresurs.ru"
+
+    # EFRSB API Configuration
+    EFRSB_BASE_URL: str = "https://bank-publications-demo.fedresurs.ru"
+    EFRSB_LOGIN: str = "demowebuser"
+    EFRSB_PASSWORD: str = "Ax!761BN"
+
     USER_AGENT: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     TARGET_CLASSIFIER_CODES: Set[str] = {'0108001', '0402006', '0101014'}
 
