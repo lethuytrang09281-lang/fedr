@@ -63,16 +63,36 @@ class FedresursClient:
                 "password": self.password
             }
 
-            logger.info(f"🔐 Authenticating as '{self.login}'...")
+            logger.info(f"🔐 Authenticating as '{self.login}' at {auth_url}")
+            logger.debug(f"📤 Auth payload: {payload}")
 
             response = await self.client.post(auth_url, json=payload)
             response.raise_for_status()
 
+            # КРИТИЧНО: Логируем полный ответ для отладки
             data = response.json()
-            self.token = data.get("token")
+            logger.info(f"🔍 AUTH RESPONSE RAW: {data}")
+            logger.info(f"🔍 Response keys: {list(data.keys())}")
+
+            # Пробуем найти токен в разных возможных полях
+            self.token = (
+                data.get("token") or
+                data.get("jwt") or
+                data.get("access_token") or
+                data.get("accessToken") or
+                data.get("bearer")
+            )
+
+            # Проверка: токен найден?
+            if not self.token:
+                logger.error(f"❌ Token not found in response! Available keys: {list(data.keys())}")
+                logger.error(f"❌ Full response: {data}")
+                return False
+
+            logger.success(f"✅ Token found: {self.token[:50]}..." if len(self.token) > 50 else f"✅ Token found: {self.token}")
 
             # Парсим дату истечения токена
-            expire_date_str = data.get("expireDate")
+            expire_date_str = data.get("expireDate") or data.get("expiresAt") or data.get("expires")
             if expire_date_str:
                 # Формат: "2025-02-06T00:00:00" или "2025-02-06T00:00:00.000Z"
                 expire_date_str = expire_date_str.replace("Z", "+00:00")
@@ -84,14 +104,23 @@ class FedresursClient:
             else:
                 self.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
 
-            # Обновляем заголовок с токеном
-            self.client.headers["Authorization"] = self.token
+            # Обновляем заголовок с токеном (только если токен не None)
+            if self.token:
+                # ВАЖНО: Добавляем префикс "Bearer " если его нет
+                if not self.token.startswith("Bearer "):
+                    self.token = f"Bearer {self.token}"
 
-            logger.success(f"✅ Authentication successful (token expires: {self.token_expires_at})")
-            return True
+                self.client.headers["Authorization"] = self.token
+                logger.success(f"✅ Authentication successful (token expires: {self.token_expires_at})")
+                logger.debug(f"🔑 Authorization header set: {self.token[:30]}...")
+                return True
+            else:
+                logger.error("❌ Cannot set Authorization header: token is None")
+                return False
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"❌ Authentication failed: HTTP {e.response.status_code} - {e.response.text}")
+            logger.error(f"❌ Authentication failed: HTTP {e.response.status_code}")
+            logger.error(f"❌ Response text: {e.response.text}")
             return False
         except Exception as e:
             logger.error(f"❌ Authentication error: {e}", exc_info=True)
