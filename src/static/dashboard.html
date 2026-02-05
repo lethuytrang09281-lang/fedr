@@ -573,6 +573,93 @@
         .card:nth-child(2) { animation-delay: 0.2s; }
         .card:nth-child(3) { animation-delay: 0.3s; }
         .card:nth-child(4) { animation-delay: 0.4s; }
+
+        /* Zone filter buttons */
+        .zone-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .zone-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+        }
+        .zone-btn.active {
+            background: rgba(0, 212, 255, 0.1);
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+            box-shadow: var(--glow-primary);
+        }
+        .zone-count {
+            background: var(--bg-secondary);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            min-width: 24px;
+            text-align: center;
+        }
+        .zone-btn.active .zone-count {
+            background: rgba(0, 212, 255, 0.2);
+        }
+
+        /* Zone badges in table */
+        .zone-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .zone-badge.GARDEN_RING { background: rgba(255, 0, 85, 0.15); color: #ff0055; }
+        .zone-badge.TTK { background: rgba(255, 184, 0, 0.15); color: #ffb800; }
+        .zone-badge.TPU { background: rgba(0, 212, 255, 0.15); color: #00d4ff; }
+        .zone-badge.OUTSIDE { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
+
+        /* Tag pills */
+        .tag-pill {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            background: rgba(57, 255, 20, 0.1);
+            color: var(--accent-secondary);
+            margin: 1px;
+        }
+        .flag-pill {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            background: rgba(255, 0, 85, 0.1);
+            color: var(--accent-danger);
+            margin: 1px;
+        }
+
+        /* Lots table rows */
+        #lotsTableBody tr {
+            border-bottom: 1px solid var(--border-color);
+            transition: background 0.15s;
+        }
+        #lotsTableBody tr:hover {
+            background: var(--bg-hover);
+        }
+        #lotsTableBody td {
+            padding: 10px 6px;
+            color: var(--text-primary);
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -835,6 +922,59 @@
         setInterval(updateClock, 1000);
         updateClock();
 
+        // === Zone Filter Logic ===
+        let currentZone = '';
+
+        function filterByZone(btn, zone) {
+            currentZone = zone;
+            document.querySelectorAll('.zone-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            applyFilters();
+        }
+
+        async function applyFilters() {
+            const params = new URLSearchParams();
+            if (currentZone) params.set('zone', currentZone);
+            if (document.getElementById('onlyRelevant').checked) params.set('is_relevant', 'true');
+            if (document.getElementById('excludeRedFlags').checked) params.set('exclude_red_flags', 'true');
+
+            try {
+                const resp = await fetch('/api/lots/filter?' + params.toString());
+                const data = await resp.json();
+                renderLotsTable(data.lots, data.pagination.total);
+            } catch (e) {
+                console.error('Filter error:', e);
+            }
+        }
+
+        function renderLotsTable(lots, total) {
+            const tbody = document.getElementById('lotsTableBody');
+            document.getElementById('filteredCount').textContent = `(${total})`;
+
+            if (!lots || lots.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: var(--text-muted);">No lots match the filter</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = lots.map(lot => {
+                const desc = lot.description.length > 60 ? lot.description.substring(0, 60) + '...' : lot.description;
+                const price = lot.start_price ? (lot.start_price / 1e6).toFixed(1) + 'M' : '-';
+                const tags = (lot.semantic_tags || []).map(t => `<span class="tag-pill">${t}</span>`).join('');
+                const flags = (lot.red_flags || []).map(f => `<span class="flag-pill">${f}</span>`).join('') || '<span style="color:var(--text-muted);">-</span>';
+                return `<tr>
+                    <td>${lot.lot_number}</td>
+                    <td title="${lot.description}">${desc}</td>
+                    <td style="text-align:right; white-space:nowrap;">${price}</td>
+                    <td style="text-align:center;"><span class="zone-badge ${lot.location_zone}">${lot.location_zone}</span></td>
+                    <td>${tags || '<span style="color:var(--text-muted);">-</span>'}</td>
+                    <td>${flags}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // Load lots table on startup
+        applyFilters();
+
         // Fetch and update stats
         async function fetchStats() {
             try {
@@ -847,6 +987,21 @@
                 document.getElementById('dbAuctions').textContent = data.counts.auctions.toLocaleString();
                 document.getElementById('dbLots').textContent = data.counts.lots.toLocaleString();
                 document.getElementById('dbCadastral').textContent = data.counts.lots_with_cadastral.toLocaleString();
+
+                // Update target lots count
+                const targetEl = document.getElementById('targetLots');
+                if (targetEl && data.counts.target_lots !== undefined) {
+                    targetEl.textContent = data.counts.target_lots.toLocaleString();
+                }
+
+                // Update zone counters
+                const zd = data.zone_distribution || {};
+                const allZones = (zd.GARDEN_RING || 0) + (zd.TTK || 0) + (zd.TPU || 0) + (zd.OUTSIDE || 0);
+                document.getElementById('zoneAll').textContent = allZones;
+                document.getElementById('zoneGardenRing').textContent = zd.GARDEN_RING || 0;
+                document.getElementById('zoneTTK').textContent = zd.TTK || 0;
+                document.getElementById('zoneTPU').textContent = zd.TPU || 0;
+                document.getElementById('zoneOutside').textContent = zd.OUTSIDE || 0;
 
                 // Update system info
                 document.getElementById('parserMode').textContent = data.system.orchestrator_mode.toUpperCase();
