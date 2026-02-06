@@ -8,9 +8,12 @@ from src.client.api import EfrsbClient
 from src.client.exceptions import EfrsbError
 from src.services.xml_parser import XMLParserService
 from src.services.ingestor import IngestionService
+from src.services.enricher import RosreestrEnricher
+from src.services.external_api import ParserAPIClient
+from src.bot.notifier import TelegramNotifier
 from src.logic.price_calculator import PriceCalculator
 from src.database.base import get_db_session
-from src.database.models import SystemState
+from src.database.models import SystemState, Lot
 from src.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,9 @@ class Orchestrator:
         self.xml_parser = XMLParserService()
         self.ingestor = IngestionService()
         self.price_calculator = PriceCalculator()
+        self.enricher = RosreestrEnricher()
+        self.notifier = TelegramNotifier()
+        self.parser_api = ParserAPIClient()
         # Нарезаем запросы по 1 дню для надежности
         self.chunk_size_days = 1 
 
@@ -123,6 +129,46 @@ class Orchestrator:
             await self.update_state("trade_monitor", current_end)
             current_start = current_end
 
+    def _classify_lot(self, description: str, cadastral_numbers: list) -> dict:
+        """
+        Классификация лота: релевантность и зона
+        """
+        description_lower = description.lower()
+
+        # Релевантность (Target vs Trash)
+        target_keywords = ["мкд", "ж-зона", "гпзу", "многоквартирн", "жилая застройка"]
+        trash_keywords = ["снт", "лпх", "дача", "огород", "садовый"]
+
+        is_relevant = any(kw in description_lower for kw in target_keywords)
+        if any(kw in description_lower for kw in trash_keywords):
+            is_relevant = False
+
+        # Определение зоны (Упрощенно)
+        # В реальности здесь должен быть ГИС-поиск или база кадастров
+        location_zone = "OUTSIDE"
+        if cadastral_numbers:
+            # Например, 77:01 - это ЦАО (примерно Садовое Кольцо)
+            # 77:02, 03... - ТТК и прочее
+            cn = cadastral_numbers[0]
+            if cn.startswith("77:01:"):
+                location_zone = "GARDEN_RING"
+            elif cn.startswith("77:"):
+                location_zone = "TTK"
+
+        # Семантические теги
+        semantic_tags = []
+        if "мкд" in description_lower or "многоквартирн" in description_lower:
+            semantic_tags.append("мкд")
+        if "участок" in description_lower:
+            semantic_tags.append("земельный участок")
+
+        return {
+            "is_relevant": is_relevant,
+            "location_zone": location_zone,
+            "semantic_tags": semantic_tags,
+            "red_flags": [] # Можно добавить логику поиска рисков
+        }
+
     async def _process_single_message(self, session, msg: dict):
         """Обработка одного сообщения"""
         if msg.get("isAnnulled"):
@@ -184,6 +230,9 @@ class Orchestrator:
                 lot_data.start_price = current_price
                 lot_data.price_schedules = schedules
 
+            # Классификация
+            classification = self._classify_lot(lot_data.description, lot_data.cadastral_numbers)
+
             # Создаем словарь лота
             lot_dict = {
                 'lot_number': getattr(lot_data, 'lot_number', 1),
@@ -191,7 +240,12 @@ class Orchestrator:
                 'start_price': lot_data.start_price,
                 'category_code': lot_data.classifier_code,
                 'cadastral_numbers': lot_data.cadastral_numbers,
-                'status': getattr(lot_data, 'status', 'Announced')
+                'status': getattr(lot_data, 'status', 'Announced'),
+                'is_relevant': classification['is_relevant'],
+                'location_zone': classification['location_zone'],
+                'semantic_tags': classification['semantic_tags'],
+                'red_flags': classification['red_flags'],
+                'is_restricted': getattr(lot_data, 'is_restricted', False)
             }
 
             if "BiddingResult" in str(msg.get("type")):
@@ -225,7 +279,38 @@ class Orchestrator:
         }
 
         # Сохраняем данные
-        await self.ingestor.save_parsed_data(session, auction_dto, lots_dicts, message_dto)
+        saved_lot_ids = await self.ingestor.save_parsed_data(session, auction_dto, lots_dicts, message_dto)
+
+        # Обогащение и Уведомление
+        for i, lot_id in enumerate(saved_lot_ids):
+            lot_dict = lots_dicts[i]
+            if lot_dict.get('is_relevant') and lot_dict.get('location_zone') in ['GARDEN_RING', 'TTK']:
+                # 1. Обогащение из Росреестра
+                if lot_dict.get('cadastral_numbers'):
+                    try:
+                        await self.enricher.enrich_lot(lot_id, session)
+                        # Обновляем данные из базы после обогащения
+                        res = await session.execute(select(Lot).where(Lot.id == lot_id))
+                        db_lot = res.scalar_one_or_none()
+                        if db_lot:
+                            lot_dict['rosreestr_area'] = db_lot.rosreestr_area
+                    except Exception as e:
+                        logger.error(f"Enrichment error for lot {lot_id}: {e}")
+
+                # 2. Уведомление в Telegram
+                try:
+                    await self.notifier.send_lot_alert({
+                        'guid': str(msg_guid),
+                        'description': lot_dict['description'],
+                        'start_price': lot_dict['start_price'],
+                        'location_zone': lot_dict['location_zone'],
+                        'cadastral_numbers': lot_dict['cadastral_numbers'],
+                        'semantic_tags': lot_dict['semantic_tags'],
+                        'red_flags': lot_dict['red_flags'],
+                        'rosreestr_area': lot_dict.get('rosreestr_area'),
+                    })
+                except Exception as e:
+                    logger.error(f"Notification error for lot {lot_id}: {e}")
 
     async def start_monitoring(self):
         logger.info("Starting Fedresurs Monitoring Service 🦅")

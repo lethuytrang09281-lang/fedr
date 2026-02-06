@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class IngestionService:
     @staticmethod
-    async def save_parsed_data(session: AsyncSession, auction_dto: dict, lots_dto: list, message_dto: dict):
+    async def save_parsed_data(session: AsyncSession, auction_dto: dict, lots_dto: list, message_dto: dict) -> list[int]:
         """
         Сохраняет распарсенные данные по паттерну Upsert.
         auction_dto: {guid, number, etp_id, organizer_inn}
@@ -42,6 +42,7 @@ class IngestionService:
             ).on_conflict_do_nothing() # Сообщение уникально по GUID
             await session.execute(stmt_msg)
 
+            saved_lot_ids = []
             # 3. Process Lots
             for lot_data in lots_dto:
                 # Извлекаем статус корректно (если вдруг в DTO пришла строка, или Enum)
@@ -64,7 +65,12 @@ class IngestionService:
                     start_price=lot_data['start_price'],
                     category_code=lot_data.get('category_code'),
                     cadastral_numbers=list(lot_data.get('cadastral_numbers') or []),
-                    status=status_value if isinstance(status_value, str) else status_value.value
+                    status=status_value if isinstance(status_value, str) else status_value.value,
+                    is_relevant=lot_data.get('is_relevant', False),
+                    location_zone=lot_data.get('location_zone', 'OUTSIDE'),
+                    semantic_tags=lot_data.get('semantic_tags', []),
+                    red_flags=lot_data.get('red_flags', []),
+                    is_restricted=lot_data.get('is_restricted', False)
                 ).on_conflict_do_update(
                     # Теперь этот constraint существует в базе!
                     constraint='lots_auction_id_lot_number_key',
@@ -73,12 +79,18 @@ class IngestionService:
                         start_price=lot_data['start_price'],
                         category_code=lot_data.get('category_code'),
                         cadastral_numbers=list(lot_data.get('cadastral_numbers') or []),
-                        status=status_value if isinstance(status_value, str) else status_value.value
+                        status=status_value if isinstance(status_value, str) else status_value.value,
+                        is_relevant=lot_data.get('is_relevant', False),
+                        location_zone=lot_data.get('location_zone', 'OUTSIDE'),
+                        semantic_tags=lot_data.get('semantic_tags', []),
+                        red_flags=lot_data.get('red_flags', []),
+                        is_restricted=lot_data.get('is_restricted', False)
                     )
                 ).returning(Lot.id)
 
                 result = await session.execute(stmt_lot)
                 lot_id = result.scalar_one()
+                saved_lot_ids.append(lot_id)
 
                 # 4. Process Price Schedules (if any)
                 if lot_data.get('price_schedules'):
@@ -98,6 +110,7 @@ class IngestionService:
 
             await session.commit()
             logger.info(f"Successfully ingested auction {auction_dto['guid']} with {len(lots_dto)} lots")
+            return saved_lot_ids
 
         except Exception as e:
             await session.rollback()
