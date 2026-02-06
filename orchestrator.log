@@ -1,0 +1,320 @@
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/pydantic/_internal/_fields.py:151: UserWarning: Field "model_custom_emoji_id" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+2026-02-06 09:19:50,981 - src.orchestrator - INFO - Starting Fedresurs Monitoring Service 🦅
+2026-02-06 09:19:50,994 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:19:50,995 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:19:50.995194+00:00
+2026-02-06 09:19:50,995 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:19:50.995194+00:00 -> 2026-01-08 09:19:50.995194+00:00
+2026-02-06 09:19:51,817 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:19:51,821 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:20:51,872 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:20:51,872 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:20:51.872471+00:00
+2026-02-06 09:20:51,872 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:20:51.872471+00:00 -> 2026-01-08 09:20:51.872471+00:00
+2026-02-06 09:20:52,304 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:20:52,305 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:21:52,355 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:21:52,355 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:21:52.355819+00:00
+2026-02-06 09:21:52,355 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:21:52.355819+00:00 -> 2026-01-08 09:21:52.355819+00:00
+2026-02-06 09:21:52,787 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:21:52,788 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:22:52,841 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:22:52,841 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:22:52.841447+00:00
+2026-02-06 09:22:52,841 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:22:52.841447+00:00 -> 2026-01-08 09:22:52.841447+00:00
+2026-02-06 09:22:53,270 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:22:53,271 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:23:53,321 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:23:53,321 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:23:53.321778+00:00
+2026-02-06 09:23:53,321 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:23:53.321778+00:00 -> 2026-01-08 09:23:53.321778+00:00
+2026-02-06 09:23:53,750 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:23:53,751 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:24:53,802 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:24:53,802 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:24:53.802735+00:00
+2026-02-06 09:24:53,802 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:24:53.802735+00:00 -> 2026-01-08 09:24:53.802735+00:00
+2026-02-06 09:24:54,232 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:24:54,233 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:25:54,284 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:25:54,284 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:25:54.284636+00:00
+2026-02-06 09:25:54,284 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:25:54.284636+00:00 -> 2026-01-08 09:25:54.284636+00:00
+2026-02-06 09:25:54,711 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:25:54,712 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:26:54,749 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:26:54,749 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:26:54.749820+00:00
+2026-02-06 09:26:54,750 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:26:54.749820+00:00 -> 2026-01-08 09:26:54.749820+00:00
+2026-02-06 09:26:55,179 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:26:55,179 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:30:06,376 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:30:06,390 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:30:06.389736+00:00
+2026-02-06 09:30:06,390 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:30:06.389736+00:00 -> 2026-01-08 09:30:06.389736+00:00
+2026-02-06 09:30:07,069 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:30:07,086 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:31:07,136 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:31:07,136 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:31:07.136429+00:00
+2026-02-06 09:31:07,136 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:31:07.136429+00:00 -> 2026-01-08 09:31:07.136429+00:00
+2026-02-06 09:31:07,562 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:31:07,564 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:32:07,600 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:32:07,600 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:32:07.600721+00:00
+2026-02-06 09:32:07,600 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:32:07.600721+00:00 -> 2026-01-08 09:32:07.600721+00:00
+2026-02-06 09:32:08,030 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:32:08,032 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:33:08,125 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:33:08,126 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:33:08.126843+00:00
+2026-02-06 09:33:08,127 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:33:08.126843+00:00 -> 2026-01-08 09:33:08.126843+00:00
+2026-02-06 09:33:08,562 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:33:08,566 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:34:08,627 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:34:08,627 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:34:08.627572+00:00
+2026-02-06 09:34:08,629 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:34:08.627572+00:00 -> 2026-01-08 09:34:08.627572+00:00
+2026-02-06 09:34:09,053 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:34:09,054 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:35:09,104 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:35:09,104 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:35:09.104344+00:00
+2026-02-06 09:35:09,104 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:35:09.104344+00:00 -> 2026-01-08 09:35:09.104344+00:00
+2026-02-06 09:35:09,532 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:35:09,536 - src.orchestrator - INFO - Restarting in 60s...
+2026-02-06 09:47:09,774 - src.orchestrator - ERROR - Failed to get state: Multiple exceptions: [Errno 111] Connect call failed ('::1', 5432, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 5432)
+2026-02-06 09:47:09,787 - src.orchestrator - INFO - Resuming sync from 2026-01-07 09:47:09.787358+00:00
+2026-02-06 09:47:09,788 - src.orchestrator - INFO - Processing chunk: 2026-01-07 09:47:09.787358+00:00 -> 2026-01-08 09:47:09.787358+00:00
+2026-02-06 09:47:10,632 - src.orchestrator - ERROR - Critical Orchestrator Error: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+Traceback (most recent call last):
+  File "/app/src/orchestrator.py", line 333, in start_monitoring
+    await self.run_sync_period(last_processed, now)
+  File "/app/src/orchestrator.py", line 93, in run_sync_period
+    response = await self.client.get_trade_messages(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 93, in get_trade_messages
+    data = await self._request("GET", "/v1/trade-messages", params=params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/client/api.py", line 42, in _request
+    await self.login()
+  File "/app/src/client/api.py", line 34, in login
+    resp.raise_for_status()
+  File "/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 1060, in raise_for_status
+    raise ClientResponseError(
+aiohttp.client_exceptions.ClientResponseError: 400, message='Bad Request', url=URL('https://bank-publications-demo.fedresurs.ru/v1/auth')
+2026-02-06 09:47:10,650 - src.orchestrator - INFO - Restarting in 60s...
