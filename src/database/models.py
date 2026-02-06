@@ -60,6 +60,19 @@ class Lot(Base):
     # Флаг для скрытых данных (Постановление №5)
     is_restricted: Mapped[bool] = mapped_column(default=False)
 
+    # Новые поля для Спринта 2
+    is_relevant: Mapped[bool] = mapped_column(default=False)
+    location_zone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    semantic_tags: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
+    red_flags: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
+
+    # Росреестр данные
+    rosreestr_area: Mapped[Optional[float]] = mapped_column(Numeric(15, 2), nullable=True)
+    rosreestr_value: Mapped[Optional[float]] = mapped_column(Numeric(20, 2), nullable=True)
+    rosreestr_vri: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    rosreestr_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    needs_enrichment: Mapped[bool] = mapped_column(default=True, index=True)
+
     auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")
     price_schedules: Mapped[List["PriceSchedule"]] = relationship("PriceSchedule", back_populates="lot", cascade="all, delete-orphan")
 

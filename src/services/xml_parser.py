@@ -280,7 +280,7 @@ class XMLParserService:
     def _extract_cadastral_numbers(self, text: str) -> List[str]:
         """
         Извлекает кадастровые номера из текста с помощью Regex
-        Шаблон: \d{2}:\d{2}:\d{3,7}:\d+
+        Шаблон: \\d{2}:\\d{2}:\\d{3,7}:\\d+
         """
         pattern = r'\d{2}:\d{2}:\d{3,7}:\d+'
         return re.findall(pattern, text)

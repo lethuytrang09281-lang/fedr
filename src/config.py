@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "password"
     DB_NAME: str = "fedresurs_db"
 
+    # Telegram
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+
+    # Parser API
+    PARSER_API_KEY: str = ""
+
     # Orchestrator settings
     SCAN_INTERVAL_HOURS: int = 1  # Интервал сканирования в часах
     SLIDING_WINDOW_DAYS: int = 90  # Количество дней для скользящего окна
