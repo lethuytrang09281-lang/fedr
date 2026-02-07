@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Checko API
     CHECKO_API_KEY: str = ""
 
+    # Moscow Open Data API
+    MOSCOW_API_KEY: str = "a32c7b59-183e-4643-ba40-6259eeb9c8b7"
+
     # FTP Archive Access (demo credentials)
     FTP_HOST: str = "ftp.fedresurs.ru"
     FTP_USER: str = "demo"
