@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import delete
-from src.database.models import Auction, Lot, MessageHistory, PriceSchedule, LotStatus
+from src.database.models import Auction, Lot, MessageHistory, PriceSchedule, LotStatus, Document
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -116,3 +116,65 @@ class IngestionService:
             await session.rollback()
             logger.error(f"Failed to ingest data for auction {auction_dto.get('guid')}: {str(e)}")
             raise
+
+    @staticmethod
+    async def process_attachments(
+        session: AsyncSession,
+        message_guid: str,
+        lot_id: int,
+        attachments: list,
+        document_extractor
+    ):
+        """
+        Process message attachments and extract structured data.
+
+        Args:
+            session: Database session
+            message_guid: Message GUID
+            lot_id: Associated lot ID
+            attachments: List of attachment dicts with 'filename' and 'data'
+            document_extractor: DocumentExtractor instance
+        """
+        if not attachments:
+            return
+
+        logger.info(f"Processing {len(attachments)} attachments for message {message_guid}")
+
+        for attachment in attachments:
+            try:
+                filename = attachment.get('filename', 'unknown')
+                file_data = attachment.get('data')  # bytes
+
+                if not file_data:
+                    logger.warning(f"No data for attachment {filename}")
+                    continue
+
+                # Detect document type
+                doc_type = document_extractor.detect_document_type(filename)
+
+                # Extract data
+                extracted = await document_extractor.extract_from_attachment(
+                    attachment_data=file_data,
+                    filename=filename,
+                    document_type=doc_type
+                )
+
+                # Save to database
+                document = Document(
+                    lot_id=lot_id,
+                    message_guid=message_guid,
+                    filename=filename,
+                    document_type=doc_type,
+                    file_size=len(file_data),
+                    extracted_data=extracted,
+                    downloaded_at=datetime.now(timezone.utc)
+                )
+
+                session.add(document)
+                logger.info(f"Extracted data from {filename} (type: {doc_type})")
+
+            except Exception as e:
+                logger.error(f"Failed to process attachment {attachment.get('filename')}: {e}")
+                # Continue with other attachments
+
+        await session.commit()

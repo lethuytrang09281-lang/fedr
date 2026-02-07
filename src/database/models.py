@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Integer, Index, UniqueConstraint, Enum as SAEnum, Boolean
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Integer, Index, UniqueConstraint, Enum as SAEnum, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -75,6 +75,7 @@ class Lot(Base):
 
     auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")
     price_schedules: Mapped[List["PriceSchedule"]] = relationship("PriceSchedule", back_populates="lot", cascade="all, delete-orphan")
+    documents: Mapped[List["Document"]] = relationship("Document", back_populates="lot", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_lots_cadastral_gin", "cadastral_numbers", postgresql_using="gin"),
@@ -105,3 +106,19 @@ class PriceSchedule(Base):
     price: Mapped[float] = mapped_column(Numeric(20, 2))
 
     lot: Mapped["Lot"] = relationship("Lot", back_populates="price_schedules")
+
+class Document(Base):
+    """Extracted data from message attachments (ЕГРН, appraisal reports, etc.)"""
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("lots.id", ondelete="CASCADE"), index=True)
+    message_guid: Mapped[Optional[UUID]] = mapped_column(PG_UUID, index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    document_type: Mapped[str] = mapped_column(String(50))  # egr_extract, appraisal_report, etc.
+    file_size: Mapped[Optional[int]] = mapped_column(Integer)  # Bytes
+    extracted_data: Mapped[Optional[dict]] = mapped_column(JSON)  # All structured data
+    downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    lot: Mapped[Optional["Lot"]] = relationship("Lot", back_populates="documents")

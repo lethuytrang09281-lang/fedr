@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     # Parser API
     PARSER_API_KEY: str = ""
 
+    # Checko API
+    CHECKO_API_KEY: str = ""
+
+    # FTP Archive Access (demo credentials)
+    FTP_HOST: str = "ftp.fedresurs.ru"
+    FTP_USER: str = "demo"
+    FTP_PASSWORD: str = "demo"
+    FTP_DOWNLOAD_LIMIT_MB: int = 50
+
     # Orchestrator settings
     SCAN_INTERVAL_HOURS: int = 1  # Интервал сканирования в часах
     SLIDING_WINDOW_DAYS: int = 90  # Количество дней для скользящего окна
