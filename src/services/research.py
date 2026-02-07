@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 from src.services.checko_client import CheckoAPIClient
-from src.services.rosreestr import RosreestrEnricher
+from src.services.enricher import RosreestrEnricher
 from src.database.models import Lot
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
