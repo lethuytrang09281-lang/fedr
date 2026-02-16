@@ -9,15 +9,24 @@
     <v-card-text>
       <v-row class="mb-4">
         <v-col cols="6">
-          <div class="text-caption">Текущая цена</div>
+          <div class="text-caption d-flex align-center">
+            <v-icon size="small" start icon="mdi-currency-rub" />
+            Текущая цена
+          </div>
           <div class="text-h6">{{ formatPrice(deal.start_price) }}</div>
         </v-col>
         <v-col cols="6">
-          <div class="text-caption">Рыночная цена</div>
+          <div class="text-caption d-flex align-center">
+            <v-icon size="small" start icon="mdi-bank" />
+            Рыночная цена
+          </div>
           <div class="text-h6">{{ formatPrice(deal.rosreestr_value) }}</div>
         </v-col>
         <v-col cols="6">
-          <div class="text-caption">Deal Score</div>
+          <div class="text-caption d-flex align-center">
+            <v-icon size="small" start icon="mdi-chart-line" />
+            Deal Score
+          </div>
           <div class="text-h6">
             <v-chip :color="scoreColor(deal.deal_score)" size="small" variant="flat">
               {{ deal.deal_score }}
@@ -25,8 +34,24 @@
           </div>
         </v-col>
         <v-col cols="6">
-          <div class="text-caption">Дисконт</div>
+          <div class="text-caption d-flex align-center">
+            <v-icon size="small" start icon="mdi-trending-down" />
+            Дисконт
+          </div>
           <div class="text-h6 text-error font-weight-bold">-{{ deal.price_deviation }}%</div>
+        </v-col>
+      </v-row>
+
+      <v-divider class="mb-4" />
+
+      <v-row class="mb-4">
+        <v-col cols="6">
+          <div class="text-caption">Стратегия</div>
+          <v-chip size="small" color="primary" variant="tonal">{{ deal.strategy }}</v-chip>
+        </v-col>
+        <v-col cols="6">
+          <div class="text-caption">Стадия</div>
+          <v-chip size="small" color="secondary" variant="tonal">{{ deal.stage }}</v-chip>
         </v-col>
       </v-row>
 

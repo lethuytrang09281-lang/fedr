@@ -34,7 +34,7 @@ const stats = computed(() => [
   },
   {
     label: 'Hidden Gems',
-    value: props.deals.filter(d => d.is_hidden_gem).length,
+    value: props.deals.filter(d => d.is_sweet_spot).length,
     color: '#FF7A00'
   },
   {

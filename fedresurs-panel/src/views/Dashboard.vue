@@ -4,9 +4,15 @@
       {{ error }}
     </v-alert>
 
-    <StatsCards :deals="deals" />
+    <div v-if="loading" class="d-flex flex-column align-center justify-center py-12">
+      <v-progress-circular indeterminate color="primary" size="64" />
+      <div class="mt-4 text-body-1">Загрузка данных...</div>
+    </div>
 
-    <DealsTable :deals="deals" @select="openDetail" />
+    <template v-else>
+      <StatsCards :deals="deals" />
+      <DealsTable :deals="deals" @select="openDetail" />
+    </template>
 
     <v-dialog v-model="dialog" max-width="800">
       <DealDetail :deal="selectedDeal" @close="dialog = false" />
@@ -22,15 +28,19 @@ import DealsTable from '@/components/DealsTable.vue'
 import DealDetail from '@/components/DealDetail.vue'
 
 const deals = ref([])
+const loading = ref(true)
 const dialog = ref(false)
 const selectedDeal = ref(null)
 const error = ref(null)
 
 onMounted(async () => {
   try {
+    loading.value = true
     deals.value = await dealsAPI.getHotDeals()
   } catch (e) {
     error.value = 'Не удалось загрузить данные: ' + e.message
+  } finally {
+    loading.value = false
   }
 })
 

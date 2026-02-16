@@ -19,7 +19,13 @@
       </template>
 
       <template #item.price_deviation="{ value }">
-        <span class="text-error font-weight-bold">-{{ value }}%</span>
+        <span :class="deviationClass(value)" class="font-weight-bold">-{{ value }}%</span>
+      </template>
+
+      <template #item.strategy="{ value }">
+        <v-chip size="x-small" variant="outlined" color="primary">
+          {{ formatStrategy(value) }}
+        </v-chip>
       </template>
     </v-data-table>
   </v-card>
@@ -39,6 +45,7 @@ const headers = [
   { title: 'ID', key: 'id', width: '80px' },
   { title: 'Район', key: 'district' },
   { title: 'Цена', key: 'start_price' },
+  { title: 'Стратегия', key: 'strategy' },
   { title: 'Deal Score', key: 'deal_score' },
   { title: 'Дисконт', key: 'price_deviation' }
 ]
@@ -51,6 +58,20 @@ function scoreColor(score) {
   if (score >= 80) return 'error'
   if (score >= 60) return 'warning'
   return 'grey'
+}
+
+function deviationClass(value) {
+  if (value >= 50) return 'text-error text-decoration-underline'
+  if (value >= 30) return 'text-error'
+  return 'text-warning'
+}
+
+function formatStrategy(value) {
+  const map = {
+    'scavenger': 'Scavenger',
+    'early_bird': 'Early Bird'
+  }
+  return map[value] || value
 }
 
 function onRowClick(event, { item }) {
