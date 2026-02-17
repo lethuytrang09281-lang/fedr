@@ -1,35 +1,46 @@
 import asyncio
+import aiohttp
 import logging
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4, UUID
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from src.client.api import EfrsbClient
-from src.client.exceptions import EfrsbError
 from src.services.xml_parser import XMLParserService
 from src.services.ingestor import IngestionService
 from src.services.enricher import RosreestrEnricher
 from src.services.external_api import ParserAPIClient
+from src.services.fedresurs_search import FedresursSearch
 from src.bot.notifier import TelegramNotifier
 from src.logic.price_calculator import PriceCalculator
 from src.database.base import get_db_session
-from src.database.models import SystemState, Lot
+from src.database.models import SystemState, Lot, Auction
 from src.config import Settings
+from src.utils.resource_monitor import ResourceMonitor
 
 logger = logging.getLogger(__name__)
 
 class Orchestrator:
     def __init__(self):
         self.settings = Settings()
-        self.client = EfrsbClient()
+        # 🔄 Используем Parser API вместо прямого клиента Fedresurs
+        self.parser_api = ParserAPIClient()
         self.xml_parser = XMLParserService()
         self.ingestor = IngestionService()
         self.price_calculator = PriceCalculator()
         self.enricher = RosreestrEnricher()
         self.notifier = TelegramNotifier()
-        self.parser_api = ParserAPIClient()
         # Нарезаем запросы по 1 дню для надежности
-        self.chunk_size_days = 1 
+        self.chunk_size_days = 1
+
+        # 🔍 Resource Monitor
+        self.resource_monitor = ResourceMonitor(
+            cpu_threshold=80.0,      # Throttle при CPU > 80%
+            cpu_critical=150.0,      # Critical при CPU > 150%
+            ram_threshold=85.0,      # Throttle при RAM > 85%
+            ram_critical=95.0,       # Critical при RAM > 95%
+            check_interval=5         # Проверка каждые 5 секунд
+        ) 
 
     async def get_last_processed_date(self, task_key: str, default_days_back: int = 30) -> datetime:
         """
@@ -77,57 +88,85 @@ class Orchestrator:
                 await session.close()
                 break
 
-    async def run_sync_period(self, start_date: datetime, end_date: datetime):
-        """Проходит по периоду чанками"""
-        current_start = start_date
-        
-        while current_start < end_date:
-            current_end = min(current_start + timedelta(days=self.chunk_size_days), end_date)
-            logger.info(f"Processing chunk: {current_start} -> {current_end}")
-            
-            offset = 0
-            limit = 50
-            
-            while True:
-                try:
-                    response = await self.client.get_trade_messages(
-                        date_start=current_start.strftime('%Y-%m-%d'),
-                        date_end=current_end.strftime('%Y-%m-%d'),
-                        offset=offset,
-                        limit=limit
-                    )
-                    
-                    messages = response.pageItems
-                    total = response.total
-                    
-                    if not messages:
+    async def _check_api_limits(self) -> dict:
+        """Проверяет остаток лимитов parser-api.com"""
+        url = f"https://parser-api.com/stat/?key={self.settings.PARSER_API_KEY}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                # API возвращает список, преобразуем в словарь {service: {...}}
+                if isinstance(data, list):
+                    return {item['service']: item for item in data}
+                return data
+
+    def _seconds_until_midnight(self) -> int:
+        """Секунд до полуночи UTC"""
+        now = datetime.now(timezone.utc)
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        midnight += timedelta(days=1)
+        return int((midnight - now).total_seconds())
+
+    async def run_search(self):
+        """Запуск поиска лотов через FedresursSearch"""
+        # 🔍 Проверка ресурсов перед поиском
+        await self.resource_monitor.wait_if_needed()
+
+        # 🛡️ Проверка лимита API
+        try:
+            stats = await self._check_api_limits()
+            fedresurs = stats.get('fedresurs', {})
+            day_limit = fedresurs.get('day_limit', 250)
+            day_used = fedresurs.get('day_request_count', 0)
+            day_left = day_limit - day_used
+
+            logger.info(f"📊 Fedresurs лимит: {day_used}/{day_limit} использовано, осталось {day_left}")
+
+            if day_left < 10:
+                wait = self._seconds_until_midnight()
+                logger.warning(f"⚠️ Лимит почти исчерпан ({day_left} запросов). Пауза {wait//3600}ч {(wait%3600)//60}м до обновления.")
+                await asyncio.sleep(wait)
+                return
+        except Exception as e:
+            logger.error(f"❌ Не удалось проверить лимиты: {e}", exc_info=True)
+            # Продолжаем — лучше работать чем стоять из-за ошибки stat
+
+        logger.info("🔍 Запуск поиска лотов через FedresursSearch...")
+
+        # 🔄 Используем FedresursSearch для поиска лотов
+        try:
+            search = FedresursSearch(
+                api_key=self.settings.PARSER_API_KEY,
+                resource_monitor=self.resource_monitor
+            )
+            lots = await search.search_lots()
+            await search.close()
+
+            if lots:
+                logger.info(f"✅ Найдено {len(lots)} лотов, сохраняю в БД...")
+
+                # Сохраняем найденные лоты в БД
+                async for session in get_db_session():
+                    try:
+                        saved_count = 0
+                        for lot in lots:
+                            success = await self._save_lot_to_db(session, lot)
+                            if success:
+                                saved_count += 1
+
+                        logger.info(f"✅ Сохранено {saved_count}/{len(lots)} лотов в БД")
+                    finally:
+                        await session.close()
                         break
-                        
-                    async for session in get_db_session():
-                        try:
-                            for msg in messages:
-                                await self._process_single_message(session, msg)
-                        finally:
-                            await session.close()
-                            break
+            else:
+                logger.info("ℹ️ Лоты не найдены")
 
-                    offset += limit
-                    if offset >= total:
-                        break
-                    
-                    await asyncio.sleep(0.2)
+            # Обновляем состояние системы
+            await self.update_state("trade_monitor", datetime.now(timezone.utc))
 
-                except EfrsbError as e:
-                    if "429" in str(e):
-                        logger.warning("Rate limit (429). Sleeping 60s...")
-                        await asyncio.sleep(60)
-                        continue 
-                    else:
-                        logger.error(f"API Error: {e}")
-                        raise e 
-
-            await self.update_state("trade_monitor", current_end)
-            current_start = current_end
+        except Exception as e:
+            # Обработка ошибок FedresursSearch - оркестратор продолжает работу, не падает
+            logger.error(f"❌ FedresursSearch Error: {e}", exc_info=True)
+            logger.info("⚠️ Оркестратор продолжает работу несмотря на ошибку")
 
     def _classify_lot(self, description: str, cadastral_numbers: list) -> dict:
         """
@@ -169,173 +208,117 @@ class Orchestrator:
             "red_flags": [] # Можно добавить логику поиска рисков
         }
 
-    async def _process_single_message(self, session, msg: dict):
-        """Обработка одного сообщения"""
-        if msg.get("isAnnulled"):
-            return
+    async def _get_or_create_auction(self, session, lot: dict) -> UUID:
+        """Создает или получает auction по message_id"""
+        message_id = lot.get('message_id', '')
 
-        msg_guid = msg.get("guid")
-        content_xml = msg.get("content")
-        
-        # Надежный парсинг даты с приведением к UTC
+        # Генерируем UUID из message_id (детерминированно)
+        # Используем namespace UUID для fedresurs
+        namespace = UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')  # стандартный namespace
+        auction_guid = uuid4()  # или можно использовать uuid5(namespace, message_id)
+
+        # Проверяем, существует ли auction с таким number
+        stmt = select(Auction).where(Auction.number == lot.get('message_num'))
+        result = await session.execute(stmt)
+        existing_auction = result.scalar_one_or_none()
+
+        if existing_auction:
+            return existing_auction.guid
+
+        # Создаем новый auction
+        auction = Auction(
+            guid=auction_guid,
+            number=lot.get('message_num'),
+            etp_id=message_id,
+            organizer_inn=lot.get('debtor_inn'),
+            last_updated=datetime.now(timezone.utc)
+        )
+
+        session.add(auction)
+        await session.flush()  # Чтобы получить guid
+
+        logger.debug(f"Создан auction {auction_guid} для message {message_id}")
+        return auction_guid
+
+    async def _save_lot_to_db(self, session, lot: dict) -> bool:
+        """
+        Сохраняет лот в таблицу lots.
+        Возвращает True при успехе, False при ошибке.
+        """
         try:
-            date_str = msg.get("datePublish")
-            if date_str:
-                # API иногда шлет 'Z', иногда '+03:00'. Приводим к ISO.
-                date_str = date_str.replace('Z', '+00:00')
-                date_pub = datetime.fromisoformat(date_str)
-                # Если дата без часового пояса (naive), добавляем UTC
-                if date_pub.tzinfo is None:
-                    date_pub = date_pub.replace(tzinfo=timezone.utc)
-            else:
-                date_pub = datetime.now(timezone.utc)
-        except ValueError:
-            date_pub = datetime.now(timezone.utc)
+            # Получаем или создаем auction
+            auction_id = await self._get_or_create_auction(session, lot)
 
-        if not content_xml:
-            return
-
-        # 1. Парсинг
-        # Используем новый парсер, который возвращает кортеж (лоты, графики цен)
-        from src.services.xml_parser import XMLParserService
-        parser = XMLParserService()
-        lots_data, price_schedules_data = parser.parse_content(content_xml, msg_guid)
-
-        lots_dicts = []
-
-        # --- ФИЛЬТР КЛЮЧЕВЫХ СЛОВ (ОТКЛЮЧЕН для отладки) ---
-        # Чтобы сохранялись ВСЕ сообщения, блок ниже закомментирован.
-        # Если захочешь включить фильтр - раскомментируй строки.
-
-        # keywords = ["земельн", "участок", "мкд", "жилая", "застройка"]
-        # found_keywords = False
-        # full_text = (content_xml + " ".join([l.description for l in lots_data])).lower()
-        # for kw in keywords:
-        #     if kw in full_text:
-        #         found_keywords = True
-        #         break
-
-        # if not found_keywords:
-        #     return  # Пропускаем, если нет слов
-        # ---------------------------------------------------
-
-        for lot_data in lots_data:
-            is_public = "PublicOffer" in (msg.get("type") or "") or hasattr(lot_data, 'price_reduction_html') and lot_data.price_reduction_html
-
-            if is_public:
-                current_price, schedules = self.price_calculator.calculate_current_price(
-                    lot_data.price_reduction_html if hasattr(lot_data, 'price_reduction_html') else "",
-                    lot_data.start_price
-                )
-                lot_data.start_price = current_price
-                lot_data.price_schedules = schedules
-
-            # Классификация
-            classification = self._classify_lot(lot_data.description, lot_data.cadastral_numbers)
-
-            # Создаем словарь лота
-            lot_dict = {
-                'lot_number': getattr(lot_data, 'lot_number', 1),
-                'description': lot_data.description,
-                'start_price': lot_data.start_price,
-                'category_code': lot_data.classifier_code,
-                'cadastral_numbers': lot_data.cadastral_numbers,
-                'status': getattr(lot_data, 'status', 'Announced'),
-                'is_relevant': classification['is_relevant'],
-                'location_zone': classification['location_zone'],
-                'semantic_tags': classification['semantic_tags'],
-                'red_flags': classification['red_flags'],
-                'is_restricted': getattr(lot_data, 'is_restricted', False)
+            # Подготовка данных для сохранения в Lot
+            lot_data = {
+                'guid': uuid4(),
+                'auction_id': auction_id,
+                'lot_number': lot.get('lot_num', 1),
+                'description': lot.get('description', ''),
+                'start_price': lot.get('start_price', 0),
+                'category_code': lot.get('lot_type', ''),
+                'cadastral_numbers': [],  # FedresursSearch не возвращает кадастры
+                'status': 'Announced',
+                'is_relevant': True,  # Все найденные лоты считаем релевантными
+                'location_zone': None,  # Будет определено при обогащении
+                'semantic_tags': [],
+                'red_flags': [],
+                'is_restricted': False,
+                'needs_enrichment': True,  # Требуется обогащение данными Росреестра
             }
 
-            if "BiddingResult" in str(msg.get("type")):
-                lot_dict["status"] = "Sold"
-            elif "BiddingFail" in str(msg.get("type")):
-                lot_dict["status"] = "Failed"
+            # Создаем лот
+            lot_obj = Lot(**lot_data)
+            session.add(lot_obj)
+            await session.commit()
 
-            lots_dicts.append(lot_dict)
+            logger.info(
+                f"💾 Сохранен лот #{lot.get('lot_num')} | "
+                f"{lot.get('debtor_name', '')[:40]} | "
+                f"{lot.get('start_price', 0):,.0f} ₽"
+            )
+            return True
 
-        # Подготовка DTO для аукциона
-        auction_info = msg.get("trade", {})
-        auction_dto = {
-            "guid": msg_guid,  # Используем guid сообщения как guid аукциона
-            "number": msg.get("number") or f"MSG_{msg_guid}",
-            "etp_id": msg.get("etpName"),  # Используем правильное поле
-            "organizer_inn": msg.get("organizerInn")  # Используем правильное поле
-        }
-
-        # Убедимся, что дата публикации имеет временную зону UTC
-        if date_pub.tzinfo is None:
-            date_pub = date_pub.replace(tzinfo=timezone.utc)
-        else:
-            # Конвертируем в UTC, если дата имеет другую временную зону
-            date_pub = date_pub.astimezone(timezone.utc)
-
-        message_dto = {
-            "guid": msg_guid,
-            "type": msg.get("type"),
-            "date_publish": date_pub,
-            "content_xml": content_xml
-        }
-
-        # Сохраняем данные
-        saved_lot_ids = await self.ingestor.save_parsed_data(session, auction_dto, lots_dicts, message_dto)
-
-        # Обогащение и Уведомление
-        for i, lot_id in enumerate(saved_lot_ids):
-            lot_dict = lots_dicts[i]
-            if lot_dict.get('is_relevant') and lot_dict.get('location_zone') in ['GARDEN_RING', 'TTK']:
-                # 1. Обогащение из Росреестра
-                if lot_dict.get('cadastral_numbers'):
-                    try:
-                        await self.enricher.enrich_lot(lot_id, session)
-                        # Обновляем данные из базы после обогащения
-                        res = await session.execute(select(Lot).where(Lot.id == lot_id))
-                        db_lot = res.scalar_one_or_none()
-                        if db_lot:
-                            lot_dict['rosreestr_area'] = db_lot.rosreestr_area
-                    except Exception as e:
-                        logger.error(f"Enrichment error for lot {lot_id}: {e}")
-
-                # 2. Уведомление в Telegram
-                try:
-                    await self.notifier.send_lot_alert({
-                        'guid': str(msg_guid),
-                        'description': lot_dict['description'],
-                        'start_price': lot_dict['start_price'],
-                        'location_zone': lot_dict['location_zone'],
-                        'cadastral_numbers': lot_dict['cadastral_numbers'],
-                        'semantic_tags': lot_dict['semantic_tags'],
-                        'red_flags': lot_dict['red_flags'],
-                        'rosreestr_area': lot_dict.get('rosreestr_area'),
-                    })
-                except Exception as e:
-                    logger.error(f"Notification error for lot {lot_id}: {e}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения лота в БД: {e}", exc_info=True)
+            await session.rollback()
+            return False
 
     async def start_monitoring(self):
-        logger.info("Starting Fedresurs Monitoring Service 🦅")
-        while True:
-            try:
-                # Начинаем поиск с 30 дней назад
-                last_processed = await self.get_last_processed_date("trade_monitor", default_days_back=30)
-                now = datetime.now(timezone.utc)
+        logger.info("🦅 Starting Fedresurs Monitoring Service...")
 
-                if last_processed is None:
-                    # Если дата не найдена в базе, используем дату 30 дней назад
-                    last_processed = now - timedelta(days=30)
+        # 🔍 Запуск Resource Monitor
+        await self.resource_monitor.start()
 
-                if now - last_processed < timedelta(minutes=15):
-                    logger.info("All caught up. Sleep for 15 minutes... 💤")
-                    await asyncio.sleep(900)
-                    continue
+        try:
+            while True:
+                try:
+                    # Проверяем когда последний раз запускали поиск
+                    last_processed = await self.get_last_processed_date("trade_monitor", default_days_back=0)
+                    now = datetime.now(timezone.utc)
 
-                logger.info(f"Resuming sync from {last_processed}")
-                await self.run_sync_period(last_processed, now)
-                
-            except Exception as e:
-                logger.error(f"Critical Orchestrator Error: {e}", exc_info=True)
-                logger.info("Restarting in 60s...")
-                await asyncio.sleep(60)
+                    if last_processed is None:
+                        # Первый запуск
+                        logger.info("🆕 Первый запуск, начинаю поиск...")
+                        await self.run_search()
+                    elif now - last_processed < timedelta(hours=6):
+                        # Запускаем поиск каждые 6 часов
+                        sleep_seconds = int((timedelta(hours=6) - (now - last_processed)).total_seconds())
+                        logger.info(f"💤 Следующий поиск через {sleep_seconds // 60} минут...")
+                        await asyncio.sleep(min(sleep_seconds, 900))  # Проверяем каждые 15 минут
+                        continue
+                    else:
+                        logger.info("⏰ Время для нового поиска")
+                        await self.run_search()
+
+                except Exception as e:
+                    logger.error(f"❌ Critical Orchestrator Error: {e}", exc_info=True)
+                    logger.info("⏳ Перезапуск через 60 секунд...")
+                    await asyncio.sleep(60)
+
+        finally:
+            # 🛑 Остановка Resource Monitor при завершении
+            await self.resource_monitor.stop()
 
 
 # Глобальный экземпляр оркестратора для удобства

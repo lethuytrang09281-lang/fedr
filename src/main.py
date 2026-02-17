@@ -3,6 +3,7 @@ import sys
 import os
 import logging
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 # Настройка логирования
 logging.basicConfig(
@@ -12,30 +13,109 @@ logging.basicConfig(
 
 sys.path.insert(0, os.path.abspath('.'))
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from src.orchestrator import Orchestrator
 from src.logic.price_calculator import PriceCalculator
 
+# Импорт API routes (согласно INSTALLATION_GUIDE и QUICK_START)
+from src.api import hunter_routes
 
-async def main():
-    """
-    Главный цикл приложения Fedresurs Radar
-    """
+
+# Глобальная переменная для оркестратора
+orchestrator = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan контекст для управления жизненным циклом приложения"""
+    global orchestrator
+
+    # Startup
+    logging.info("🚀 Запуск Fedresurs Radar...")
+
+    # 🎯 Запуск оркестратора с Resource Monitor
+    orchestrator = Orchestrator()
+    asyncio.create_task(run_orchestrator())
+    logging.info("✅ Оркестратор запущен в фоновом режиме с Resource Monitor")
+
+    yield
+
+    # Shutdown
+    logging.info("🛑 Остановка Fedresurs Radar...")
+    # Orchestrator останавливается автоматически при завершении задачи
+
+
+async def run_orchestrator():
+    """Фоновая задача для оркестратора"""
     try:
-        print("Запуск Fedresurs Radar Orchestrator...")
-
-        # Создаем новый оркестратор
-        orchestrator = Orchestrator()
-
-        # Инициализация калькулятора цен
-        price_calculator = PriceCalculator()
-
-        # Запуск мониторинга
         await orchestrator.start_monitoring()
-
-    except KeyboardInterrupt:
-        print("Остановка orchestrator по сигналу пользователя...")
     except Exception as e:
-        logging.error(f"Ошибка в основном цикле: {str(e)}")
+        logging.error(f"Ошибка в оркестраторе: {str(e)}")
+
+
+# Создание FastAPI приложения
+app = FastAPI(
+    title="Fedresurs Radar API",
+    description="API для Hunter Engine и анализа торгов",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Подключение роутеров (согласно INSTALLATION_GUIDE)
+app.include_router(hunter_routes.router)
+
+
+@app.get("/")
+async def root():
+    """Корневой endpoint"""
+    return {
+        "name": "Fedresurs Radar",
+        "version": "1.0.0",
+        "status": "running",
+        "docs": "/docs"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Проверка здоровья приложения"""
+    return {
+        "status": "healthy",
+        "orchestrator_running": orchestrator is not None
+    }
+
+
+# ВРЕМЕННО ОТКЛЮЧЕНО (пока нет Parser API ключа)
+# async def main():
+#     """
+#     Главный цикл приложения Fedresurs Radar (режим CLI)
+#     """
+#     try:
+#         print("Запуск Fedresurs Radar Orchestrator...")
+
+#         # Создаем новый оркестратор
+#         local_orchestrator = Orchestrator()
+
+#         # Инициализация калькулятора цен
+#         price_calculator = PriceCalculator()
+
+#         # Запуск мониторинга
+#         await local_orchestrator.start_monitoring()
+
+#     except KeyboardInterrupt:
+#         print("Остановка orchestrator по сигналу пользователя...")
+#     except Exception as e:
+#         logging.error(f"Ошибка в основном цикле: {str(e)}")
 
 
 def run_price_calculation_demo():
@@ -66,8 +146,5 @@ def run_price_calculation_demo():
 
 
 if __name__ == "__main__":
-    # Запуск демонстрации (опционально)
-    # run_price_calculation_demo()
-
-    # Запуск основного цикла
-    asyncio.run(main())
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

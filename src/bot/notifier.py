@@ -6,11 +6,20 @@ from src.config import settings
 
 class TelegramNotifier:
     def __init__(self):
-        self.bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-        self.chat_id = settings.TELEGRAM_CHAT_ID
+        # Проверяем наличие токена - если нет, делаем notifier неактивным
+        if settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID:
+            self.bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+            self.chat_id = settings.TELEGRAM_CHAT_ID
+            self.enabled = True
+        else:
+            self.bot = None
+            self.chat_id = None
+            self.enabled = False
 
     async def send_lot_alert(self, lot: dict):
         """Отправляет уведомление о новом релевантном лоте"""
+        if not self.enabled:
+            return  # Не отправляем уведомления если Telegram не настроен
 
         # Формируем текст
         text = self._format_message(lot)
@@ -102,4 +111,5 @@ class TelegramNotifier:
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
     async def close(self):
-        await self.bot.session.close()
+        if self.enabled and self.bot:
+            await self.bot.session.close()

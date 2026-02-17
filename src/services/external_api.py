@@ -85,6 +85,105 @@ class ParserAPIClient:
         }
         return await self._make_request(url, params)
 
+    async def search_ur(
+        self,
+        org_region_id: int = 77,
+        from_record: int = 0
+    ) -> Optional[Dict]:
+        """
+        Поиск банкротов юрлиц по региону (ШАГ 1)
+
+        Args:
+            org_region_id: ID региона (77 = Москва)
+            from_record: Смещение для пагинации
+
+        Returns:
+            {
+                "count": int,  # Общее количество
+                "result": [
+                    {
+                        "id": str,  # ID организации для get_org_messages
+                        "debtor": str,  # Название должника
+                        "inn": str,
+                        "address": str
+                    }
+                ]
+            }
+        """
+        url = f"{self.BASE_URL}/fedresurs_api/search_ur"
+        params = {
+            "key": self.api_key,
+            "orgRegionID": org_region_id,
+            "from": from_record
+        }
+        return await self._make_request(url, params)
+
+    async def get_org_messages(
+        self,
+        org_id: str,
+        from_record: int = 0
+    ) -> Optional[Dict]:
+        """
+        Получить сообщения организации (ШАГ 2)
+
+        Args:
+            org_id: ID организации из search_ur
+            from_record: Смещение для пагинации
+
+        Returns:
+            {
+                "count": int,
+                "result": [
+                    {
+                        "id": str,  # ID сообщения для get_message
+                        "type": str,  # "Объявление о проведении торгов"
+                        "date": str
+                    }
+                ]
+            }
+        """
+        url = f"{self.BASE_URL}/fedresurs_api/get_org_messages"
+        params = {
+            "key": self.api_key,
+            "id": org_id,
+            "from": from_record
+        }
+        return await self._make_request(url, params)
+
+    async def get_message(
+        self,
+        message_id: str
+    ) -> Optional[Dict]:
+        """
+        Получить детали сообщения о торгах (ШАГ 3)
+
+        Args:
+            message_id: ID сообщения из get_org_messages
+
+        Returns:
+            {
+                "trade_type": str,
+                "trade_app_start_date": str,
+                "trade_app_end_date": str,
+                "lots": [
+                    {
+                        "num": str,
+                        "description": str,  # Ищем "здание" здесь
+                        "start_price": str,  # Фильтр <= 300M
+                        "step": str,
+                        "deposit": str,
+                        "type": str  # Классификация
+                    }
+                ]
+            }
+        """
+        url = f"{self.BASE_URL}/fedresurs_api/get_message"
+        params = {
+            "key": self.api_key,
+            "id": message_id
+        }
+        return await self._make_request(url, params)
+
     async def get_api_stats(self) -> Optional[Dict]:
         """Получить статистику использования API"""
         url = f"https://parser-api.com/stat/"

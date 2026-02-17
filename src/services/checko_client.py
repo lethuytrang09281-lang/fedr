@@ -2,10 +2,12 @@
 Checko.ru API Client for company research and risk assessment.
 Docs: https://checko.ru/integration/api
 """
-import httpx
+import aiohttp
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import logging
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -15,23 +17,326 @@ class CheckoAPIClient:
 
     BASE_URL = "https://api.checko.ru/v2"
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: Optional[str] = None):
         """
         Initialize Checko API client.
 
         Args:
             api_key: Checko API key (starts with 'uxa')
         """
-        self.api_key = api_key
+        self.api_key = api_key or settings.CHECKO_API_KEY
         self.headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30),
+                headers=self.headers
+            )
+        return self.session
+
+    async def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
+        """
+        Make HTTP request to Checko API.
+        Returns None on error, logs all errors.
+        """
+        try:
+            session = await self._get_session()
+            url = f"{self.BASE_URL}/{endpoint}"
+            
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    logger.error(f"Checko API request failed: {endpoint}, status: {response.status}")
+                    return None
+
+                data = await response.json()
+                
+                # Check meta.status == "ok" before returning data
+                if data.get("meta", {}).get("status") != "ok":
+                    logger.warning(f"Checko API returned non-ok status for {endpoint}: {data.get('meta', {})}")
+                    return None
+
+                return data
+
+        except Exception as e:
+            logger.error(f"Error making request to Checko API {endpoint}: {e}")
+            return None
 
     async def close(self):
-        """Close HTTP client."""
-        await self.client.aclose()
+        """Close HTTP session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+
+    async def get_company(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get company information by INN.
+
+        Args:
+            inn: Company INN (10 or 12 digits)
+
+        Returns:
+            Company data including name, director FIO, status, OKVED
+        """
+        try:
+            data = await self._make_request("company", {"inn": inn})
+            if not data:
+                return None
+
+            company_data = data.get("company", {})
+            return {
+                "inn": inn,
+                "company_name": company_data.get("name"),
+                "director_fio": company_data.get("director"),
+                "status": company_data.get("status"),
+                "okved": company_data.get("okved"),
+                "ogrn": company_data.get("ogrn"),
+                "registration_date": company_data.get("registration_date"),
+                "address": company_data.get("address"),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": company_data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting company info for INN {inn}: {e}")
+            return None
+
+    async def get_entrepreneur(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get entrepreneur (ИП) information by INN.
+
+        Args:
+            inn: Entrepreneur INN (12 digits)
+
+        Returns:
+            Entrepreneur data
+        """
+        try:
+            data = await self._make_request("entrepreneur", {"inn": inn})
+            if not data:
+                return None
+
+            entrepreneur_data = data.get("entrepreneur", {})
+            return {
+                "inn": inn,
+                "full_name": entrepreneur_data.get("full_name"),
+                "status": entrepreneur_data.get("status"),
+                "okved": entrepreneur_data.get("okved"),
+                "ogrn": entrepreneur_data.get("ogrn"),
+                "registration_date": entrepreneur_data.get("registration_date"),
+                "address": entrepreneur_data.get("address"),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": entrepreneur_data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting entrepreneur info for INN {inn}: {e}")
+            return None
+
+    async def get_person(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get person information by INN.
+
+        Args:
+            inn: Person INN
+
+        Returns:
+            Person data
+        """
+        try:
+            data = await self._make_request("person", {"inn": inn})
+            if not data:
+                return None
+
+            person_data = data.get("person", {})
+            return {
+                "inn": inn,
+                "full_name": person_data.get("full_name"),
+                "birth_date": person_data.get("birth_date"),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": person_data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting person info for INN {inn}: {e}")
+            return None
+
+    async def get_finances(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get financial data for company.
+
+        Args:
+            inn: Company INN
+
+        Returns:
+            Financial data
+        """
+        try:
+            data = await self._make_request("finances", {"inn": inn})
+            if not data:
+                return None
+
+            return {
+                "inn": inn,
+                "finances": data.get("finances", []),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting finances for INN {inn}: {e}")
+            return None
+
+    async def get_legal_cases(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get legal cases for company.
+
+        Args:
+            inn: Company INN
+
+        Returns:
+            Legal cases data
+        """
+        try:
+            data = await self._make_request("legal-cases", {"inn": inn})
+            if not data:
+                return None
+
+            return {
+                "inn": inn,
+                "legal_cases": data.get("legal_cases", []),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting legal cases for INN {inn}: {e}")
+            return None
+
+    async def get_enforcements(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get enforcement proceedings for company.
+
+        Args:
+            inn: Company INN
+
+        Returns:
+            Enforcement proceedings data
+        """
+        try:
+            data = await self._make_request("enforcements", {"inn": inn})
+            if not data:
+                return None
+
+            return {
+                "inn": inn,
+                "enforcements": data.get("enforcements", []),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting enforcements for INN {inn}: {e}")
+            return None
+
+    async def get_bankruptcy(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get bankruptcy messages for company.
+
+        Args:
+            inn: Company INN
+
+        Returns:
+            Bankruptcy messages data
+        """
+        try:
+            data = await self._make_request("bankruptcy-messages", {"inn": inn})
+            if not data:
+                return None
+
+            return {
+                "inn": inn,
+                "bankruptcy_messages": data.get("bankruptcy_messages", []),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting bankruptcy messages for INN {inn}: {e}")
+            return None
+
+    async def get_fedresurs(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get Fedresurs messages for company.
+
+        Args:
+            inn: Company INN
+
+        Returns:
+            Fedresurs messages data
+        """
+        try:
+            data = await self._make_request("fedresurs", {"inn": inn})
+            if not data:
+                return None
+
+            return {
+                "inn": inn,
+                "fedresurs_messages": data.get("fedresurs_messages", []),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting Fedresurs messages for INN {inn}: {e}")
+            return None
+
+    async def search(self, by: str, obj: str, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Search in Checko database.
+
+        Args:
+            by: Search field (name, founder-name, leader-name, okved)
+            obj: Object type (company, entrepreneur, person)
+            query: Search query
+
+        Returns:
+            Search results
+        """
+        try:
+            params = {
+                "by": by,
+                "obj": obj,
+                "query": query
+            }
+            
+            data = await self._make_request("search", params)
+            if not data:
+                return None
+
+            return {
+                "search_params": params,
+                "results": data.get("results", []),
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Error searching Checko with params {params}: {e}")
+            return None
 
     async def get_company_info(self, inn: str) -> Optional[Dict[str, Any]]:
         """
@@ -44,12 +349,18 @@ class CheckoAPIClient:
             Company data including registration, financial info, etc.
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/company/{inn}"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get company info for INN {inn}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get company info for INN {inn}: {response.status}")
+                    return None
+
+                return await response.json()
+
+        except Exception as e:
+            logger.error(f"Error getting company info for INN {inn}: {e}")
             return None
 
     async def get_bankruptcy_info(self, inn: str) -> Optional[Dict[str, Any]]:
@@ -63,12 +374,18 @@ class CheckoAPIClient:
             Bankruptcy status, cases, dates
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/company/{inn}/bankruptcy"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get bankruptcy info for INN {inn}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get bankruptcy info for INN {inn}: {response.status}")
+                    return None
+
+                return await response.json()
+
+        except Exception as e:
+            logger.error(f"Error getting bankruptcy info for INN {inn}: {e}")
             return None
 
     async def get_court_cases(self, inn: str) -> Optional[List[Dict[str, Any]]]:
@@ -82,13 +399,19 @@ class CheckoAPIClient:
             List of court cases with status, dates, amounts
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/company/{inn}/court-cases"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("cases", [])
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get court cases for INN {inn}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get court cases for INN {inn}: {response.status}")
+                    return None
+
+                data = await response.json()
+                return data.get("cases", [])
+
+        except Exception as e:
+            logger.error(f"Error getting court cases for INN {inn}: {e}")
             return None
 
     async def get_financial_analysis(self, inn: str) -> Optional[Dict[str, Any]]:
@@ -102,12 +425,18 @@ class CheckoAPIClient:
             Financial metrics, profitability, liquidity ratios
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/company/{inn}/financial"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get financial analysis for INN {inn}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get financial analysis for INN {inn}: {response.status}")
+                    return None
+
+                return await response.json()
+
+        except Exception as e:
+            logger.error(f"Error getting financial analysis for INN {inn}: {e}")
             return None
 
     async def get_founders(self, inn: str) -> Optional[List[Dict[str, Any]]]:
@@ -121,13 +450,19 @@ class CheckoAPIClient:
             List of founders with shares, INNs, relations
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/company/{inn}/founders"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("founders", [])
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get founders for INN {inn}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get founders for INN {inn}: {response.status}")
+                    return None
+
+                data = await response.json()
+                return data.get("founders", [])
+
+        except Exception as e:
+            logger.error(f"Error getting founders for INN {inn}: {e}")
             return None
 
     async def get_related_companies(self, inn: str) -> Optional[List[Dict[str, Any]]]:
@@ -141,13 +476,19 @@ class CheckoAPIClient:
             List of related companies with connection type
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/company/{inn}/related"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("companies", [])
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get related companies for INN {inn}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get related companies for INN {inn}: {response.status}")
+                    return None
+
+                data = await response.json()
+                return data.get("companies", [])
+
+        except Exception as e:
+            logger.error(f"Error getting related companies for INN {inn}: {e}")
             return None
 
     async def get_licenses(self, inn: str) -> Optional[List[Dict[str, Any]]]:
@@ -161,13 +502,19 @@ class CheckoAPIClient:
             List of active licenses
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/company/{inn}/licenses"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("licenses", [])
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get licenses for INN {inn}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get licenses for INN {inn}: {response.status}")
+                    return None
+
+                data = await response.json()
+                return data.get("licenses", [])
+
+        except Exception as e:
+            logger.error(f"Error getting licenses for INN {inn}: {e}")
             return None
 
     async def search_by_name(self, company_name: str, limit: int = 10) -> Optional[List[Dict[str, Any]]]:
@@ -182,14 +529,20 @@ class CheckoAPIClient:
             List of matching companies with INNs
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/search"
             params = {"query": company_name, "limit": limit}
-            response = await self.client.get(url, headers=self.headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("results", [])
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to search companies by name '{company_name}': {e}")
+
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to search companies by name '{company_name}': {response.status}")
+                    return None
+
+                data = await response.json()
+                return data.get("results", [])
+
+        except Exception as e:
+            logger.error(f"Error searching companies by name '{company_name}': {e}")
             return None
 
     async def calculate_risk_score(self, inn: str) -> Optional[Dict[str, Any]]:

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     # Parser API
     PARSER_API_KEY: str = ""
+    FEDRESURS_API_KEY: str = ""
+    ARBITR_API_KEY: str = ""
+    REESTR_API_KEY: str = ""
+    MOSGORSUD_API_KEY: str = ""
 
     # Checko API
     CHECKO_API_KEY: str = ""

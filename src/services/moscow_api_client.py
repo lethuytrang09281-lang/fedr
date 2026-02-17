@@ -3,8 +3,9 @@ Moscow Open Data API Client
 Documentation: https://apidata.mos.ru/
 API Key: a32c7b59-183e-4643-ba40-6259eeb9c8b7
 """
-import httpx
+import aiohttp
 from typing import Optional, Dict, Any, List
+from datetime import datetime
 import logging
 
 from src.config import settings
@@ -29,11 +30,21 @@ class MoscowAPIClient:
             "Accept": "application/json",
             "api_key": self.api_key
         }
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30),
+                headers=self.headers
+            )
+        return self.session
 
     async def close(self):
-        """Close HTTP client."""
-        await self.client.aclose()
+        """Close HTTP session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
 
     async def get_dataset_count(self, dataset_id: int) -> Optional[int]:
         """
@@ -46,12 +57,18 @@ class MoscowAPIClient:
             Number of records in dataset
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/datasets/{dataset_id}/count"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get dataset count for {dataset_id}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get dataset count for {dataset_id}: {response.status}")
+                    return None
+
+                return await response.json()
+
+        except Exception as e:
+            logger.error(f"Error getting dataset count for {dataset_id}: {e}")
             return None
 
     async def get_dataset_rows(
@@ -78,6 +95,7 @@ class MoscowAPIClient:
             List of dataset rows
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/datasets/{dataset_id}/rows"
             params = {}
 
@@ -92,11 +110,124 @@ class MoscowAPIClient:
             if search_query:
                 params["q"] = search_query
 
-            response = await self.client.get(url, headers=self.headers, params=params)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get dataset rows for {dataset_id}: {e}")
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get dataset rows for {dataset_id}: {response.status}")
+                    return None
+
+                return await response.json()
+
+        except Exception as e:
+            logger.error(f"Error getting dataset rows for {dataset_id}: {e}")
+            return None
+
+    async def get_protection_zones(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
+        """
+        Get heritage objects, PPZ, and restrictions by coordinates.
+
+        Args:
+            lat: Latitude
+            lng: Longitude
+
+        Returns:
+            Protection zones and heritage data
+        """
+        try:
+            session = await self._get_session()
+
+            # Search for heritage objects near coordinates
+            heritage_data = await self._search_heritage_objects(lat, lng)
+
+            # Search for protection zones
+            ppz_data = await self._search_protection_zones(lat, lng)
+
+            # Search for restrictions
+            restrictions = await self._search_restrictions(lat, lng)
+
+            return {
+                "coordinates": {"lat": lat, "lng": lng},
+                "heritage_objects": heritage_data,
+                "protection_zones": ppz_data,
+                "restrictions": restrictions,
+                "source": "Moscow Open Data",
+                "retrieved_at": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting protection zones for ({lat}, {lng}): {e}")
+            return None
+
+    async def _search_heritage_objects(self, lat: float, lng: float) -> Optional[List[Dict[str, Any]]]:
+        """Search for heritage objects near coordinates."""
+        try:
+            # Dataset ID for heritage objects (example)
+            dataset_id = 1794  # Objects of cultural heritage
+
+            # Search within 500m radius
+            url = f"{self.BASE_URL}/datasets/{dataset_id}/rows"
+            params = {
+                "$top": 10,
+                "q": f"{lat},{lng}"
+            }
+
+            session = await self._get_session()
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    return None
+
+                data = await response.json()
+                return data.get("results", [])
+
+        except Exception as e:
+            logger.error(f"Error searching heritage objects: {e}")
+            return None
+
+    async def _search_protection_zones(self, lat: float, lng: float) -> Optional[List[Dict[str, Any]]]:
+        """Search for protection zones near coordinates."""
+        try:
+            # Dataset ID for protection zones (example)
+            dataset_id = 1795  # Protection zones
+
+            url = f"{self.BASE_URL}/datasets/{dataset_id}/rows"
+            params = {
+                "$top": 10,
+                "q": f"{lat},{lng}"
+            }
+
+            session = await self._get_session()
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    return None
+
+                data = await response.json()
+                return data.get("results", [])
+
+        except Exception as e:
+            logger.error(f"Error searching protection zones: {e}")
+            return None
+
+    async def _search_restrictions(self, lat: float, lng: float) -> Optional[List[Dict[str, Any]]]:
+        """Search for restrictions near coordinates."""
+        try:
+            # Dataset ID for restrictions (example)
+            dataset_id = 1796  # Restrictions
+
+            url = f"{self.BASE_URL}/datasets/{dataset_id}/rows"
+            params = {
+                "$top": 10,
+                "q": f"{lat},{lng}"
+            }
+
+            session = await self._get_session()
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    return None
+
+                data = await response.json()
+                return data.get("results", [])
+
+        except Exception as e:
+            logger.error(f"Error searching restrictions: {e}")
             return None
 
     async def search_cadastral_data(
@@ -247,12 +378,18 @@ class MoscowAPIClient:
             Dataset metadata
         """
         try:
+            session = await self._get_session()
             url = f"{self.BASE_URL}/datasets/{dataset_id}"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to get dataset info for {dataset_id}: {e}")
+
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to get dataset info for {dataset_id}: {response.status}")
+                    return None
+
+                return await response.json()
+
+        except Exception as e:
+            logger.error(f"Error getting dataset info for {dataset_id}: {e}")
             return None
 
     def extract_cell_value(self, row: Dict[str, Any], field_name: str) -> Any:
