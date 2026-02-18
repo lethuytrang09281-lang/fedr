@@ -47,26 +47,47 @@ class Orchestrator:
         Возвращает дату последнего парсинга. Гарантированно возвращает aware-datetime (UTC).
         """
         default_date = datetime.now(timezone.utc) - timedelta(days=default_days_back)
-        
-        async for session in get_db_session():
-            try:
-                stmt = select(SystemState.last_processed_date).where(SystemState.task_key == task_key)
-                result = await session.execute(stmt)
-                db_date = result.scalar_one_or_none()
 
-                if db_date:
-                    # Если база вернула дату без зоны (naive), принудительно ставим UTC
-                    if db_date.tzinfo is None:
-                        db_date = db_date.replace(tzinfo=timezone.utc)
-                    return db_date
+        try:
+            session_count = 0
+            result_date = None  # Сохраняем результат чтобы вернуть его ПОСЛЕ finally
 
-                return default_date
-            except Exception as e:
-                logger.error(f"Failed to get state: {e}")
-                return default_date
-            finally:
-                await session.close()
-                break
+            async for session in get_db_session():
+                session_count += 1
+                try:
+                    stmt = select(SystemState.last_processed_date).where(SystemState.task_key == task_key)
+                    result = await session.execute(stmt)
+                    db_date = result.scalar_one_or_none()
+
+                    if db_date:
+                        # Если база вернула дату без зоны (naive), принудительно ставим UTC
+                        if db_date.tzinfo is None:
+                            db_date = db_date.replace(tzinfo=timezone.utc)
+                        result_date = db_date
+                    else:
+                        result_date = default_date
+
+                except Exception as e:
+                    logger.error(f"Failed to get state: {e}", exc_info=True)
+                    result_date = default_date
+                finally:
+                    await session.close()
+                    break
+
+            # Если получили результат из БД, возвращаем его
+            if result_date is not None:
+                return result_date
+
+            if session_count == 0:
+                logger.error(f"❌ get_db_session() yielded {session_count} sessions (expected 1+)")
+
+        except Exception as e:
+            logger.error(f"Failed to get DB session: {e}", exc_info=True)
+            return default_date
+
+        # Если цикл не выполнился (не должно происходить), возвращаем default
+        logger.warning(f"⚠️ get_db_session() did not yield! Returning default_date={default_date}")
+        return default_date
 
     async def update_state(self, task_key: str, new_date: datetime):
         """Сохраняет прогресс в БД"""
@@ -160,13 +181,14 @@ class Orchestrator:
             else:
                 logger.info("ℹ️ Лоты не найдены")
 
-            # Обновляем состояние системы
-            await self.update_state("trade_monitor", datetime.now(timezone.utc))
-
         except Exception as e:
             # Обработка ошибок FedresursSearch - оркестратор продолжает работу, не падает
             logger.error(f"❌ FedresursSearch Error: {e}", exc_info=True)
             logger.info("⚠️ Оркестратор продолжает работу несмотря на ошибку")
+
+        finally:
+            # ⚠️ ВАЖНО: Обновляем состояние ВСЕГДА (даже при ошибке), чтобы не было бесконечной петли
+            await self.update_state("trade_monitor", datetime.now(timezone.utc))
 
     def _classify_lot(self, description: str, cadastral_numbers: list) -> dict:
         """
@@ -296,6 +318,7 @@ class Orchestrator:
                     # Проверяем когда последний раз запускали поиск
                     last_processed = await self.get_last_processed_date("trade_monitor", default_days_back=0)
                     now = datetime.now(timezone.utc)
+                    logger.info(f"🔍 DEBUG: last_processed={last_processed}, type={type(last_processed).__name__}")
 
                     if last_processed is None:
                         # Первый запуск
