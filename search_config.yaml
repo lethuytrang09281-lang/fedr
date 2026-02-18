@@ -1,0 +1,122 @@
+# Fedresurs Search Configuration
+# Единый конфиг для поиска недооцененной недвижимости
+
+# Целевой регион
+region:
+  id: 77  # Москва
+  name: "Москва"
+
+# Фильтры по объекту
+filters:
+  # Максимальная цена (рубли)
+  max_price: 300000000  # 300 миллионов
+
+  # Ключевые слова для поиска в описании лота
+  keywords:
+    - "здание"
+    - "МКД"
+    - "многоквартирный дом"
+    - "офис"
+    - "нежилое помещение"
+    - "административное здание"
+    - "торговый центр"
+
+  # Минимальная площадь (кв.м) - опционально
+  min_area: null
+
+  # Целевые зоны Москвы (для скоринга)
+  target_zones:
+    garden_ring:
+      name: "Садовое кольцо"
+      priority: 1
+      score_bonus: 40
+    ttk:
+      name: "ТТК"
+      priority: 2
+      score_bonus: 25
+    mkad:
+      name: "МКАД"
+      priority: 3
+      score_bonus: 10
+
+# Параметры поиска
+search:
+  # Максимум организаций для сканирования (ШАГ 1)
+  max_organizations: 100
+
+  # Максимум организаций для глубокой проверки (ШАГ 2+3)
+  max_organizations_deep: 50
+
+  # Задержка между запросами (секунды)
+  request_delay: 3
+
+  # Интервал между полными сканированиями (часы)
+  scan_interval_hours: 6
+
+# Лимиты API (защита от перерасхода)
+api_limits:
+  fedresurs:
+    daily: 250
+    monthly: 7500
+    warn_threshold: 200  # Предупреждение при достижении
+
+  arbitr:
+    daily: 200
+    monthly: 200
+    use_only_for_hot_deals: true  # Только для score >= 70
+
+  reestr:
+    daily: 200
+    monthly: 200
+    use_only_for_hot_deals: true
+
+  mosgorsud:
+    daily: 200
+    monthly: 200
+    use_only_for_hot_deals: true
+
+# Скоринг
+scoring:
+  # Порог для "горячей" сделки
+  hot_deal_threshold: 80
+
+  # Порог для "хорошей" сделки
+  good_deal_threshold: 60
+
+  # Порог для "проверки"
+  review_threshold: 40
+
+  # Веса для расчета итогового скора
+  weights:
+    investment_score: 1.0
+    fraud_score: 0.6  # Штраф
+
+# Уведомления
+notifications:
+  telegram:
+    enabled: true
+    hot_deals_only: true  # Уведомлять только о score >= 80
+
+  # Slack (опционально)
+  slack:
+    enabled: false
+    webhook_url: null
+
+# Хранение данных
+storage:
+  # Путь для PDF выписок
+  documents_path: "/app/storage/lots"
+
+  # Автоочистка старых данных (дни)
+  cleanup_after_days: 90
+
+# Отладка
+debug:
+  # Подробные логи
+  verbose_logging: true
+
+  # Mock режим (тестирование без реальных API запросов)
+  mock_mode: false
+
+  # Лимит лотов для тестирования
+  test_lot_limit: null

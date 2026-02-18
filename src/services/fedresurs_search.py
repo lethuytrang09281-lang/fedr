@@ -303,7 +303,7 @@ class FedresursSearch:
 
     def _is_trade_message(self, msg: dict) -> bool:
         """Это сообщение о торгах?"""
-        msg_type = msg.get("type", "").lower()
+        msg_type = (msg.get("type") or "").lower()
         return any(t in msg_type for t in SEARCH_CONFIG["trade_message_types"])
 
     async def get_trade_message_ids(self, org: dict) -> list:
@@ -358,8 +358,8 @@ class FedresursSearch:
         Проверяем: это нужный нам лот?
         Возвращает обогащённый лот или None.
         """
-        description = lot.get("description", "").lower()
-        lot_type = lot.get("type", "").lower()
+        description = (lot.get("description") or "").lower()
+        lot_type = (lot.get("type") or "").lower()
         text_to_search = description + " " + lot_type
 
         # Фильтр по ключевым словам

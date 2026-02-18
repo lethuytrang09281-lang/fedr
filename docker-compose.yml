@@ -32,6 +32,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./alembic/versions:/app/alembic/versions
+      - ./data:/app/data
 
 volumes:
   postgres_data:

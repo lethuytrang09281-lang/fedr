@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --copper: #D4781C;
+  --charcoal: #0B0C0E;
+}
+
+body {
+  background-color: var(--charcoal);
+  color: #d1d5db;
+}
+
+.glass-panel {
+  background: rgba(18, 20, 23, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(212, 120, 28, 0.3);
+  border-radius: 2px;
+}
+
+.bloomberg-grid {
+  border-collapse: collapse;
+}
+
+.bloomberg-grid td,
+.bloomberg-grid th {
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 4px 8px;
+}
+
+.sniper-gradient {
+  background: linear-gradient(180deg, transparent 0%, rgba(212, 120, 28, 0.05) 100%);
+  border-top: 1px dashed var(--copper);
+}

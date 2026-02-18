@@ -4,7 +4,6 @@ import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import 'vuetify/styles'
 import '@mdi/font/css/materialdesignicons.css'
-import './assets/bloomberg.css'
 
 import App from './App.vue'
 
@@ -12,25 +11,18 @@ const vuetify = createVuetify({
   components,
   directives,
   theme: {
-    defaultTheme: 'bloomberg',
+    defaultTheme: 'dark',
     themes: {
-      bloomberg: {
-        dark: true,
+      dark: {
         colors: {
-          background: '#0B0C0E',
-          surface: '#121417',
-          primary: '#D4781C',
-          secondary: '#6B7280',
-          success: '#10B981',
-          error: '#EF4444',
-          warning: '#F59E0B',
-          info: '#3B82F6'
+          primary: '#FF7A00',
+          success: '#4CAF50',
+          error: '#F44336',
+          warning: '#FF9800'
         }
       }
     }
   }
 })
 
-createApp(App)
-  .use(vuetify)
-  .mount('#app')
+createApp(App).use(vuetify).mount('#app')

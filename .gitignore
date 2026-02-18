@@ -28,6 +28,22 @@ Thumbs.db
 
 # Environment variables
 .env
+.env.*
+
+# Node
+node_modules/
+.vite/
+package-lock.json
+
+# Data files
+data/
+
+# Sensitive / temp files
+NEW_SSH_KEY_FOR_GITHUB.txt
+
+# Build artifacts
+analysis.html
+**/analysis.html
 
 # Python
 __pycache__/
