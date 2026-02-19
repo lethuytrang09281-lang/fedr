@@ -73,6 +73,9 @@ class Lot(Base):
     rosreestr_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     needs_enrichment: Mapped[bool] = mapped_column(default=True, index=True)
 
+    # Скоринг
+    deal_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 1), nullable=True)
+
     auction: Mapped["Auction"] = relationship("Auction", back_populates="lots")
     price_schedules: Mapped[List["PriceSchedule"]] = relationship("PriceSchedule", back_populates="lot", cascade="all, delete-orphan")
     documents: Mapped[List["Document"]] = relationship("Document", back_populates="lot", cascade="all, delete-orphan")

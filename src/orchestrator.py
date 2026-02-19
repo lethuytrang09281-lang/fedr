@@ -14,8 +14,10 @@ from src.services.ingestor import IngestionService
 from src.services.enricher import RosreestrEnricher
 from src.services.external_api import ParserAPIClient
 from src.services.fedresurs_search import FedresursSearch
+from src.services.checko_client import CheckoAPIClient
 from src.bot.notifier import TelegramNotifier
 from src.logic.price_calculator import PriceCalculator
+from src.logic.scorer import DealScorer
 from src.database.base import get_db_session
 from src.database.models import SystemState, Lot, Auction
 from src.config import Settings
@@ -35,6 +37,9 @@ class Orchestrator:
         self.notifier = TelegramNotifier()
         # Нарезаем запросы по 1 дню для надежности
         self.chunk_size_days = 1
+
+        self.checko = CheckoAPIClient()
+        self.scorer = DealScorer()
 
         # 🔍 Resource Monitor
         self.resource_monitor = ResourceMonitor(
@@ -221,22 +226,26 @@ class Orchestrator:
                 disk_path = self._save_lots_to_disk(lots)
 
                 # 2. Записываем в БД
+                saved_pairs = []  # [(lot_dict, lot_id), ...]
                 async for session in get_db_session():
                     try:
-                        saved_count = 0
                         for lot in lots:
-                            success = await self._save_lot_to_db(session, lot)
-                            if success:
-                                saved_count += 1
+                            lot_id = await self._save_lot_to_db(session, lot)
+                            if lot_id is not None:
+                                saved_pairs.append((lot, lot_id))
 
-                        logger.info(f"✅ Сохранено {saved_count}/{len(lots)} лотов в БД")
+                        logger.info(f"✅ Сохранено {len(saved_pairs)}/{len(lots)} лотов в БД")
 
-                        # 3. Ставим .done только если всё прошло
-                        if saved_count > 0:
+                        # 3. Ставим .done только если есть успешные записи
+                        if saved_pairs:
                             open(disk_path + ".done", "w").close()
                     finally:
                         await session.close()
                         break
+
+                # 4. Скоринг и Telegram уведомления
+                for lot, lot_id in saved_pairs:
+                    await self._score_and_notify_lot(lot, lot_id)
             else:
                 logger.info("ℹ️ Лоты не найдены")
 
@@ -321,10 +330,10 @@ class Orchestrator:
         logger.debug(f"Создан auction {auction_guid} для message {message_id}")
         return auction_guid
 
-    async def _save_lot_to_db(self, session, lot: dict) -> bool:
+    async def _save_lot_to_db(self, session, lot: dict) -> int | None:
         """
         Сохраняет лот в таблицу lots.
-        Возвращает True при успехе, False при ошибке.
+        Возвращает id лота при успехе, None при ошибке.
         """
         try:
             # Получаем или создаем auction
@@ -352,18 +361,63 @@ class Orchestrator:
             lot_obj = Lot(**lot_data)
             session.add(lot_obj)
             await session.commit()
+            await session.refresh(lot_obj)
 
             logger.info(
                 f"💾 Сохранен лот #{lot.get('lot_num')} | "
                 f"{lot.get('debtor_name', '')[:40]} | "
                 f"{lot.get('start_price', 0):,.0f} ₽"
             )
-            return True
+            return lot_obj.id
 
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения лота в БД: {e}", exc_info=True)
             await session.rollback()
-            return False
+            return None
+
+    async def _score_and_notify_lot(self, lot: dict, lot_id: int):
+        """
+        Считает deal_score, сохраняет в БД и отправляет Telegram при score >= 80.
+        """
+        try:
+            # Получаем антифрод-флаги из Checko (если есть ИНН)
+            antifraud_flags = []
+            debtor_inn = lot.get('debtor_inn')
+            if debtor_inn:
+                flags = await self.checko.get_antifraud_flags(debtor_inn)
+                if flags:
+                    antifraud_flags = flags
+
+            # Считаем скоринг
+            result = self.scorer.calculate(lot, antifraud_flags)
+            deal_score = result['deal_score']
+
+            # Обновляем запись в БД
+            async for session in get_db_session():
+                try:
+                    from sqlalchemy import update
+                    await session.execute(
+                        update(Lot).where(Lot.id == lot_id).values(deal_score=deal_score)
+                    )
+                    await session.commit()
+                finally:
+                    await session.close()
+                    break
+
+            logger.info(
+                f"📊 Скоринг лота #{lot.get('lot_num')}: "
+                f"deal={deal_score} inv={result['investment_score']} fraud={result['fraud_score']} "
+                f"[{result['label']}]"
+            )
+
+            # Telegram уведомление для HOT DEAL (>= 80)
+            if deal_score >= 80:
+                alert_lot = {**lot, 'deal_score': deal_score, **result['breakdown']}
+                await self.notifier.send_lot_alert(alert_lot)
+                logger.info(f"🔥 HOT DEAL отправлен в Telegram: лот #{lot.get('lot_num')} score={deal_score}")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка скоринга лота {lot_id}: {e}", exc_info=True)
 
     async def start_monitoring(self):
         logger.info("🦅 Starting Fedresurs Monitoring Service...")

@@ -4,7 +4,7 @@ Uses async aiohttp for all requests.
 """
 import aiohttp
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime
 import asyncio
 

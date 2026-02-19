@@ -633,3 +633,48 @@ TASKS_EOF
   - Добавлены `await` для всех вызовов клиента
   - Добавлен метод `close()` для корректного закрытия HTTP сессии
   - `enrich_lot` теперь полностью async без блокировки event loop
+
+---
+
+### Сессия 7 — 19.02.2026 (ночь)
+**Модель: claude-sonnet-4-6**
+
+**Баги исправлены:**
+- ✅ Баг `lot_number`: приходил строкой `'1'` → добавлен `int()` в `orchestrator.py:278`
+- ✅ Восстановлен фронтенд: удалённые компоненты (`FeedSidebar`, `Dashboard` и др.) восстановлены из git, убран Vuetify из `vite.config.js`, пересобран и задеплоен в `/var/www/html/`
+- ✅ Исправлен импорт `List` в `rosreestr_client.py`
+
+**Реализовано:**
+
+**Disk persistence (защита от потери данных):**
+- `orchestrator._save_lots_to_disk()` — сохраняет лоты в `/app/data/raw_lots/{ts}_lots.json` ДО записи в БД
+- `orchestrator._process_pending_lots_from_disk()` — при старте подхватывает файлы без `.done` маркера
+- `.done` маркер создаётся только после успешной записи в БД
+
+**TASK-004: Скоринг:**
+- ✅ `src/logic/scorer.py` — класс `DealScorer` с формулой `deal_score = investment_score - fraud_score * 0.6`
+- ✅ `deal_score Numeric(5,1)` добавлен в модель `Lot`
+- ✅ Миграция `8613b61acc8b` применена в БД
+- ✅ `orchestrator._score_and_notify_lot()` — после сохранения лота:
+  - вызывает `CheckoAPIClient.get_antifraud_flags(debtor_inn)`
+  - считает скоринг
+  - сохраняет `deal_score` в БД
+  - при `score >= 80` → `notifier.send_lot_alert()`
+
+**Лимиты API:**
+- `fedresurs daily_limit` снижен до **30** для отладочного первого запуска
+- После подтверждения работы → поднять до 240
+
+**Статус на конец сессии (23:50 МСК):**
+- Оркестратор ждёт 00:00 UTC (3ч МСК) — сброс лимита
+- Первый запуск с новым кодом: `daily_limit=30`, скоринг включён
+- Контейнер: `fedr-app-1` up
+
+**После 03:00 МСК — проверить:**
+```bash
+docker logs fedr-app-1 2>&1 | grep -v resource_monitor | tail -60
+docker exec fedr-db-1 psql -U postgres -d fedresurs_db \
+  -c "SELECT id, description[:60], start_price, deal_score FROM lots ORDER BY deal_score DESC NULLS LAST LIMIT 10;"
+```
+Если лоты есть и deal_score заполнен → поднять лимит до 240:
+`SEARCH_CONFIG["daily_limit"] = 240` в `src/services/fedresurs_search.py`
