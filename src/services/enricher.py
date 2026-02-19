@@ -1,12 +1,12 @@
 import asyncio
 import logging
 from typing import Optional, Dict, Any
-from rosreestr_api.clients.rosreestr import PKKRosreestrAPIClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import Lot
 from src.database.base import async_session_factory
+from src.services.rosreestr_client import RosreestrClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,37 +14,35 @@ class RosreestrEnricher:
     """Обогащение данных через API Росреестра (ПКК)"""
 
     def __init__(self):
-        self.client = PKKRosreestrAPIClient()
+        self.client = RosreestrClient()
 
-    def get_parcel_info(self, cadastral_number: str) -> Optional[Dict[str, Any]]:
+    async def get_parcel_info(self, cadastral_number: str) -> Optional[Dict[str, Any]]:
         """Получает данные по кадастровому номеру участка"""
         try:
-            data = self.client.get_parcel_by_cadastral_id(cadastral_number)
+            data = await self.client.get_by_cadastral(cadastral_number)
             if data:
-                attrs = data.get('attrs', {})
                 return {
-                    'area': attrs.get('area_value'),
-                    'cadastral_value': attrs.get('cad_cost'),
-                    'address': attrs.get('address'),
-                    'category': attrs.get('category_type'),
-                    'vri': attrs.get('util_by_doc') or attrs.get('util_code'),
+                    'area': data.get('area'),
+                    'cadastral_value': data.get('cadastral_value'),
+                    'address': data.get('address'),
+                    'category': data.get('type'),
+                    'vri': data.get('purpose'),
                 }
         except Exception as e:
             logger.error(f"Error fetching parcel {cadastral_number}: {e}")
         return None
 
-    def get_building_info(self, cadastral_number: str) -> Optional[Dict[str, Any]]:
+    async def get_building_info(self, cadastral_number: str) -> Optional[Dict[str, Any]]:
         """Получает данные по кадастровому номеру здания"""
         try:
-            data = self.client.get_building_by_cadastral_id(cadastral_number)
+            data = await self.client.get_by_cadastral(cadastral_number)
             if data:
-                attrs = data.get('attrs', {})
                 return {
-                    'area': attrs.get('area_value'),
-                    'cadastral_value': attrs.get('cad_cost'),
-                    'address': attrs.get('address'),
-                    'purpose': attrs.get('purpose'),
-                    'floors': attrs.get('floors'),
+                    'area': data.get('area'),
+                    'cadastral_value': data.get('cadastral_value'),
+                    'address': data.get('address'),
+                    'purpose': data.get('purpose'),
+                    'floors': data.get('floor_count'),
                 }
         except Exception as e:
             logger.error(f"Error fetching building {cadastral_number}: {e}")
@@ -61,9 +59,9 @@ class RosreestrEnricher:
         cadastral = lot.cadastral_numbers[0]
 
         # Пробуем сначала как участок, потом как здание
-        info = self.get_parcel_info(cadastral)
+        info = await self.get_parcel_info(cadastral)
         if not info:
-            info = self.get_building_info(cadastral)
+            info = await self.get_building_info(cadastral)
 
         if info:
             lot.rosreestr_area = info.get('area')
@@ -78,6 +76,10 @@ class RosreestrEnricher:
         lot.needs_enrichment = False  # Помечаем как обработанный
         await session.commit()
         return False
+
+    async def close(self):
+        """Закрывает HTTP сессию клиента"""
+        await self.client.close()
 
 
 class EnrichmentWorker:
