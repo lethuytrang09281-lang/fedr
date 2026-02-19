@@ -1,6 +1,9 @@
 import asyncio
 import aiohttp
 import logging
+import json
+import os
+import glob
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4, UUID
 from sqlalchemy import select
@@ -127,6 +130,55 @@ class Orchestrator:
         midnight += timedelta(days=1)
         return int((midnight - now).total_seconds())
 
+    RAW_LOTS_DIR = "/app/data/raw_lots"
+
+    def _save_lots_to_disk(self, lots: list) -> str:
+        """Сохраняет сырые лоты на диск до записи в БД. Возвращает путь к файлу."""
+        os.makedirs(self.RAW_LOTS_DIR, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(self.RAW_LOTS_DIR, f"{ts}_lots.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "collected_at": datetime.now(timezone.utc).isoformat(),
+                "source": "fedresurs",
+                "lots": lots
+            }, f, ensure_ascii=False, default=str)
+        logger.info(f"💾 Лоты сохранены на диск: {path} ({len(lots)} шт.)")
+        return path
+
+    async def _process_pending_lots_from_disk(self):
+        """При старте подхватывает необработанные файлы (без .done маркера)."""
+        if not os.path.isdir(self.RAW_LOTS_DIR):
+            return
+        pending = sorted([
+            f for f in glob.glob(os.path.join(self.RAW_LOTS_DIR, "*_lots.json"))
+            if not os.path.exists(f + ".done")
+        ])
+        if not pending:
+            return
+        logger.info(f"🔄 Найдено {len(pending)} необработанных файлов лотов, восстанавливаю...")
+        for json_path in pending:
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                lots = data.get("lots", [])
+                logger.info(f"  → {os.path.basename(json_path)}: {len(lots)} лотов")
+                async for session in get_db_session():
+                    try:
+                        saved = 0
+                        for lot in lots:
+                            if await self._save_lot_to_db(session, lot):
+                                saved += 1
+                        logger.info(f"  ✅ Восстановлено {saved}/{len(lots)} лотов из {os.path.basename(json_path)}")
+                        open(json_path + ".done", "w").close()  # маркер
+                    except Exception as e:
+                        logger.error(f"  ❌ Ошибка восстановления {json_path}: {e}", exc_info=True)
+                    finally:
+                        await session.close()
+                        break
+            except Exception as e:
+                logger.error(f"  ❌ Не удалось прочитать {json_path}: {e}", exc_info=True)
+
     async def run_search(self):
         """Запуск поиска лотов через FedresursSearch"""
         # 🔍 Проверка ресурсов перед поиском
@@ -142,7 +194,7 @@ class Orchestrator:
 
             logger.info(f"📊 Fedresurs лимит: {day_used}/{day_limit} использовано, осталось {day_left}")
 
-            if day_left < 10:
+            if day_left <= 10:
                 wait = self._seconds_until_midnight()
                 logger.warning(f"⚠️ Лимит почти исчерпан ({day_left} запросов). Пауза {wait//3600}ч {(wait%3600)//60}м до обновления.")
                 await asyncio.sleep(wait)
@@ -163,9 +215,12 @@ class Orchestrator:
             await search.close()
 
             if lots:
-                logger.info(f"✅ Найдено {len(lots)} лотов, сохраняю в БД...")
+                logger.info(f"✅ Найдено {len(lots)} лотов, сохраняю на диск и в БД...")
 
-                # Сохраняем найденные лоты в БД
+                # 1. Сохраняем на диск ДО записи в БД
+                disk_path = self._save_lots_to_disk(lots)
+
+                # 2. Записываем в БД
                 async for session in get_db_session():
                     try:
                         saved_count = 0
@@ -175,6 +230,10 @@ class Orchestrator:
                                 saved_count += 1
 
                         logger.info(f"✅ Сохранено {saved_count}/{len(lots)} лотов в БД")
+
+                        # 3. Ставим .done только если всё прошло
+                        if saved_count > 0:
+                            open(disk_path + ".done", "w").close()
                     finally:
                         await session.close()
                         break
@@ -275,7 +334,7 @@ class Orchestrator:
             lot_data = {
                 'guid': uuid4(),
                 'auction_id': auction_id,
-                'lot_number': lot.get('lot_num', 1),
+                'lot_number': int(lot.get('lot_num', 1)),
                 'description': lot.get('description', ''),
                 'start_price': lot.get('start_price', 0),
                 'category_code': lot.get('lot_type', ''),
@@ -312,6 +371,9 @@ class Orchestrator:
         # 🔍 Запуск Resource Monitor
         await self.resource_monitor.start()
 
+        # 🔄 Восстановление необработанных лотов с диска
+        await self._process_pending_lots_from_disk()
+
         try:
             while True:
                 try:
@@ -328,7 +390,7 @@ class Orchestrator:
                         # Запускаем поиск каждые 6 часов
                         sleep_seconds = int((timedelta(hours=6) - (now - last_processed)).total_seconds())
                         logger.info(f"💤 Следующий поиск через {sleep_seconds // 60} минут...")
-                        await asyncio.sleep(min(sleep_seconds, 900))  # Проверяем каждые 15 минут
+                        await asyncio.sleep(max(1, min(sleep_seconds, 900)))  # Проверяем каждые 15 минут, минимум 1с
                         continue
                     else:
                         logger.info("⏰ Время для нового поиска")
