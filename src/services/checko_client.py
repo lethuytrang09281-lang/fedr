@@ -655,3 +655,126 @@ class CheckoAPIClient:
         except Exception as e:
             logger.error(f"Failed to calculate risk score for INN {inn}: {e}")
             return None
+
+    async def get_antifraud_flags(self, inn: str) -> Optional[List[str]]:
+        """
+        Get anti-fraud flags for company by INN.
+        
+        Extracts risk flags from /company endpoint response:
+        - МассРуковод / МассУчред → массовые директор/учредитель
+        - ДисквЛицо / ДисквЛица → дисквалификация
+        - Санкции + СанкцУчр → санкционные списки
+        - НелегалФин → нелегальная финансовая деятельность
+        - НедобПост → недобросовестный поставщик
+        - ЮрАдрес.Недост → недостоверный адрес
+        - ЮрАдрес.МассАдрес[] → массовый адрес
+        - ЕФРСБ[] → записи о банкротстве
+
+        Args:
+            inn: Company INN (10 or 12 digits)
+
+        Returns:
+            List of triggered anti-fraud flags (e.g. ["МассРуковод", "Санкции"])
+            Returns empty list if no flags found, None on error.
+        """
+        try:
+            data = await self._make_request("company", {"inn": inn})
+            if not data:
+                return None
+
+            company_data = data.get("company", {})
+            if not company_data:
+                return []
+
+            flags = []
+            
+            # Check simple boolean flags
+            for flag_key in ["МассРуковод", "МассУчред", "ДисквЛицо", "ДисквЛица", 
+                            "Санкции", "СанкцУчр", "НелегалФин", "НедобПост", "ЮрАдрес.Недост"]:
+                if company_data.get(flag_key):
+                    flags.append(flag_key)
+            
+            # Check mass address (array)
+            if company_data.get("ЮрАдрес.МассАдрес"):
+                flags.append("ЮрАдрес.МассАдрес")
+            
+            # Check ЕФРСБ (array of bankruptcy records)
+            if company_data.get("ЕФРСБ") and len(company_data.get("ЕФРСБ", [])) > 0:
+                flags.append("ЕФРСБ")
+
+            return flags
+
+        except Exception as e:
+            logger.error(f"Error getting antifraud flags for INN {inn}: {e}")
+            return None
+
+    async def get_full_profile(self, inn: str) -> Optional[Dict[str, Any]]:
+        """
+        Get comprehensive company profile in a single call.
+        
+        Aggregates key data from multiple endpoints:
+        - Company basic info (name, director, status, address)
+        - Anti-fraud flags
+        - Financial summary (taxes, revenue if available)
+        
+        This is optimized for the enrichment pipeline - gets all needed
+        data with minimal API calls.
+
+        Args:
+            inn: Company INN (10 or 12 digits)
+
+        Returns:
+            Dict with:
+            - inn, company_name, director_fio, status, address
+            - antifraud_flags: list of triggered flags
+            - registration_date, ogrn, okved
+            - source: "Checko"
+            - retrieved_at: ISO timestamp
+        """
+        try:
+            # Get company data (includes antifraud flags)
+            data = await self._make_request("company", {"inn": inn})
+            if not data:
+                return None
+
+            company_data = data.get("company", {})
+            if not company_data:
+                return None
+
+            # Extract antifraud flags
+            antifraud_flags = []
+            for flag_key in ["МассРуковод", "МассУчред", "ДисквЛицо", "ДисквЛица",
+                            "Санкции", "СанкцУчр", "НелегалФин", "НедобПост", "ЮрАдрес.Недост"]:
+                if company_data.get(flag_key):
+                    antifraud_flags.append(flag_key)
+            if company_data.get("ЮрАдрес.МассАдрес"):
+                antifraud_flags.append("ЮрАдрес.МассАдрес")
+            if company_data.get("ЕФРСБ") and len(company_data.get("ЕФРСБ", [])) > 0:
+                antifraud_flags.append("ЕФРСБ")
+
+            # Build profile
+            profile = {
+                "inn": inn,
+                "company_name": company_data.get("name"),
+                "director_fio": company_data.get("director"),
+                "status": company_data.get("status"),
+                "address": company_data.get("address"),
+                "registration_date": company_data.get("registration_date"),
+                "ogrn": company_data.get("ogrn"),
+                "okved": company_data.get("okved"),
+                "antifraud_flags": antifraud_flags,
+                "antifraud_descriptions": [ANTIFRAUD_FLAGS.get(f, f) for f in antifraud_flags],
+                # Additional useful fields
+                "capital": company_data.get("УстКап.Сумма"),  # уставный капитал
+                "employees_count": company_data.get("СЧР"),   # среднесписочная численность
+                "tax_debt": company_data.get("Налоги.СумУпл"), # налоги (косвенный оборот)
+                "source": "Checko",
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "raw_data": company_data
+            }
+
+            return profile
+
+        except Exception as e:
+            logger.error(f"Error getting full profile for INN {inn}: {e}")
+            return None
