@@ -1,3 +1,9 @@
-Skills location: /mnt/skills/user/fedresurs-pro
+Skills location: /root/fedr/skills
 Always read SKILL.md before starting tasks.
 Check references/ for detailed documentation.
+After completing a task — update TASKS.md: mark as done with date ✅ ВЫПОЛНЕНО DD.MM.YYYY
+After completing a task:
+1. Mark done in TASKS.md with ✅ ВЫПОЛНЕНО DD.MM.YYYY
+2. Add session summary to Claude.md if architecture changed
+3. git add -A && git commit -m "done: TASK-XXX description"
+4. git push origin claude/fedresurs-mvp-panel-CEGUc
