@@ -1,6 +1,21 @@
 """
 Checko.ru API Client for company research and risk assessment.
 Docs: https://checko.ru/integration/api
+
+Correct endpoints (from CLAUDE.md):
+- /company?inn=...             → юрлицо (ЕГРЮЛ)
+- /entrepreneur?inn=...        → ИП (ЕГРИП)
+- /person?inn=...              → физлицо
+- /search?by=...&obj=...       → поиск (name/founder-name/leader-name/okved)
+- /finances?inn=...            → финотчётность (Росстат + ФНС)
+- /legal-cases?inn=...         → арбитражные дела (КАД, задержка 1-2 нед.)
+- /enforcements?inn=...        → исполнительные производства (ФССП)
+- /inspections?inn=...         → проверки (Генпрокуратура)
+- /bankruptcy-messages?inn=... → записи ЕФРСБ
+- /fedresurs?inn=...           → сообщения Федресурса
+- /contracts?inn=&law=44       → госконтракты (44-ФЗ/94-ФЗ/223-ФЗ)
+- /timeline?inn=...            → история изменений
+- /bank?bic=...                → банк по БИК
 """
 import aiohttp
 from typing import Optional, Dict, Any, List
@@ -10,6 +25,21 @@ import logging
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# Anti-fraud flags mapping (from /company response)
+ANTIFRAUD_FLAGS = {
+    "МассРуковод": "Массовый руководитель",
+    "МассУчред": "Массовый учредитель",
+    "ДисквЛицо": "Дисквалифицированное лицо",
+    "ДисквЛица": "Дисквалифицированные лица",
+    "Санкции": "Санкции",
+    "СанкцУчр": "Санкции учредителя",
+    "НелегалФин": "Нелегальная финансовая деятельность",
+    "НедобПост": "Недобросовестный поставщик",
+    "ЮрАдрес.Недост": "Недостоверный юридический адрес",
+    "ЮрАдрес.МассАдрес": "Массовый юридический адрес",
+}
 
 
 class CheckoAPIClient:
