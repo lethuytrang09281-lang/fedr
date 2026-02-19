@@ -534,9 +534,10 @@ GET /bankruptcy-messages?inn=... → записи ЕФРСБ
 3. Добавить `get_full_profile(inn)` → агрегирует нужные данные за один вызов
 
 **Критерии готовности:**
-- [ ] Все endpoints соответствуют документации из CLAUDE.md
-- [ ] `get_antifraud_flags(inn)` возвращает список строк с флагами
-- [ ] Нет вызовов несуществующих endpoints
+- [x] Все endpoints соответствуют документации из CLAUDE.md
+- [x] `get_antifraud_flags(inn)` возвращает список строк с флагами
+- [x] `get_full_profile(inn)` — агрегирует данные за один вызов
+- [x] Нет вызовов несуществующих endpoints
 
 ---
 
