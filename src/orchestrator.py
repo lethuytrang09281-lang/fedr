@@ -19,7 +19,7 @@ from src.bot.notifier import TelegramNotifier
 from src.logic.price_calculator import PriceCalculator
 from src.logic.scorer import DealScorer
 from src.database.base import get_db_session
-from src.database.models import SystemState, Lot, Auction
+from src.database.models import SystemState, Lot, Auction, Lead
 from src.config import Settings
 from src.utils.resource_monitor import ResourceMonitor
 
@@ -216,8 +216,11 @@ class Orchestrator:
                 api_key=self.settings.PARSER_API_KEY,
                 resource_monitor=self.resource_monitor
             )
-            lots = await search.search_lots()
+            result = await search.search_lots()
             await search.close()
+
+            lots = result.get("lots", []) if isinstance(result, dict) else result
+            leads = result.get("leads", []) if isinstance(result, dict) else []
 
             if lots:
                 logger.info(f"✅ Найдено {len(lots)} лотов, сохраняю на диск и в БД...")
@@ -248,6 +251,22 @@ class Orchestrator:
                     await self._score_and_notify_lot(lot, lot_id)
             else:
                 logger.info("ℹ️ Лоты не найдены")
+
+            # 5. Сохраняем лиды (ранний захват)
+            if leads:
+                logger.info(f"🌱 Найдено {len(leads)} лидов, сохраняю...")
+                saved_leads = 0
+                async for session in get_db_session():
+                    try:
+                        for lead in leads:
+                            if await self._save_lead_to_db(session, lead):
+                                saved_leads += 1
+                        logger.info(f"✅ Сохранено {saved_leads}/{len(leads)} лидов в БД")
+                    finally:
+                        await session.close()
+                        break
+            else:
+                logger.info("ℹ️ Лиды не найдены")
 
         except Exception as e:
             # Обработка ошибок FedresursSearch - оркестратор продолжает работу, не падает
@@ -333,47 +352,109 @@ class Orchestrator:
     async def _save_lot_to_db(self, session, lot: dict) -> int | None:
         """
         Сохраняет лот в таблицу lots.
-        Возвращает id лота при успехе, None при ошибке.
+        Возвращает id лота при успехе, None при ошибке или дубле.
         """
         try:
             # Получаем или создаем auction
             auction_id = await self._get_or_create_auction(session, lot)
 
-            # Подготовка данных для сохранения в Lot
-            lot_data = {
-                'guid': uuid4(),
-                'auction_id': auction_id,
-                'lot_number': int(lot.get('lot_num', 1)),
-                'description': lot.get('description', ''),
-                'start_price': lot.get('start_price', 0),
-                'category_code': lot.get('lot_type', ''),
-                'cadastral_numbers': [],  # FedresursSearch не возвращает кадастры
-                'status': 'Announced',
-                'is_relevant': True,  # Все найденные лоты считаем релевантными
-                'location_zone': None,  # Будет определено при обогащении
-                'semantic_tags': [],
-                'red_flags': [],
-                'is_restricted': False,
-                'needs_enrichment': True,  # Требуется обогащение данными Росреестра
-            }
+            lot_num = int(lot.get('lot_num', 1))
 
-            # Создаем лот
-            lot_obj = Lot(**lot_data)
-            session.add(lot_obj)
+            # INSERT ON CONFLICT DO NOTHING — атомарно, без гонок и ошибок на дублях
+            stmt = insert(Lot).values(
+                guid=uuid4(),
+                auction_id=auction_id,
+                lot_number=lot_num,
+                description=lot.get('description', ''),
+                start_price=lot.get('start_price', 0),
+                category_code=lot.get('lot_type', ''),
+                cadastral_numbers=[],
+                status='Announced',
+                is_relevant=True,
+                location_zone=None,
+                semantic_tags=[],
+                red_flags=[],
+                is_restricted=False,
+                needs_enrichment=True,
+                # Данные должника
+                debtor_name=lot.get('debtor_name'),
+                debtor_inn=lot.get('debtor_inn'),
+                debtor_ogrn=lot.get('debtor_ogrn'),
+                debtor_address=lot.get('debtor_address'),
+                # Дело и управляющий
+                case_num=lot.get('case_num'),
+                manager_name=lot.get('manager_name'),
+                # Параметры торгов
+                trade_type=lot.get('trade_type'),
+                trade_app_start=lot.get('trade_app_start'),
+                trade_app_end=lot.get('trade_app_end'),
+                trade_place=lot.get('trade_place'),
+                step=lot.get('step'),
+                deposit=lot.get('deposit'),
+                # Ссылка на сообщение
+                message_id=lot.get('message_id'),
+                message_num=lot.get('message_num'),
+            ).on_conflict_do_nothing(
+                index_elements=['auction_id', 'lot_number']
+            ).returning(Lot.id)
+
+            result = await session.execute(stmt)
             await session.commit()
-            await session.refresh(lot_obj)
+
+            lot_id = result.scalar_one_or_none()
+            if lot_id is None:
+                logger.debug(f"⏭️ Лот #{lot_num} уже в БД, пропускаем")
+                return None
 
             logger.info(
-                f"💾 Сохранен лот #{lot.get('lot_num')} | "
+                f"💾 Сохранен лот #{lot_num} | "
                 f"{lot.get('debtor_name', '')[:40]} | "
                 f"{lot.get('start_price', 0):,.0f} ₽"
             )
-            return lot_obj.id
+            return lot_id
 
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения лота в БД: {e}", exc_info=True)
             await session.rollback()
             return None
+
+    async def _save_lead_to_db(self, session, lead: dict) -> bool:
+        """
+        Сохраняет лид в таблицу leads.
+        Возвращает True при успехе, False при дубле или ошибке.
+        """
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            stmt = pg_insert(Lead).values(
+                debtor_guid=lead.get("debtor_guid"),
+                debtor_name=lead.get("debtor_name"),
+                debtor_inn=lead.get("debtor_inn"),
+                message_type=lead.get("message_type"),
+                description=lead.get("description"),
+                address=lead.get("address"),
+                estimated_value=lead.get("estimated_value"),
+                source_message_id=lead.get("source_message_id"),
+                published_at=lead.get("published_at"),
+                status="new",
+            ).on_conflict_do_nothing(index_elements=["source_message_id"])
+
+            result = await session.execute(stmt)
+            await session.commit()
+
+            if result.rowcount == 0:
+                logger.debug(f"⏭️ Лид {lead.get('source_message_id')} уже в БД")
+                return False
+
+            logger.info(
+                f"🌱 Сохранён лид | {lead.get('debtor_name', '')[:40]} | "
+                f"type={lead.get('message_type')} | {lead.get('description', '')[:50]}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения лида: {e}", exc_info=True)
+            await session.rollback()
+            return False
 
     async def _score_and_notify_lot(self, lot: dict, lot_id: int):
         """

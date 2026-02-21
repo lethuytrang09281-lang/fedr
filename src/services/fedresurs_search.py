@@ -11,10 +11,44 @@ import aiohttp
 import logging
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# СЕМАНТИЧЕСКИЙ ФИЛЬТР
+# ============================================================
+
+PROPERTY_KEYWORDS = [
+    "нежилое здание", "офисное здание", "торговое здание",
+    "бизнес-центр", "торговый центр", "административное здание",
+    "офисный центр", "многоквартирный дом", "жилой дом", "мкд", "здание",
+]
+
+GEO_KEYWORDS = [
+    "москва", "московск",
+    "цао", "центральный административный округ",
+    "тверской", "арбат", "пресненский", "басманный",
+    "замоскворечье", "китай-город", "мещанский", "таганский", "якиманка",
+    "хамовники", "якиманка", "лефортово", "красносельский",
+]
+
+CADASTRAL_PATTERN = re.compile(r'\b77:\d{2}:\d+')
+
+
+def semantic_match(text: str) -> tuple[bool, bool, bool]:
+    """
+    Возвращает (property_match, geo_match, cadastral_match).
+    Проходит если: (property_match AND geo_match) OR cadastral_match
+    """
+    t = text.lower()
+    prop = any(kw in t for kw in PROPERTY_KEYWORDS)
+    geo = any(kw in t for kw in GEO_KEYWORDS)
+    cadastral = bool(CADASTRAL_PATTERN.search(text))
+    return prop, geo, cadastral
 
 
 # ============================================================
@@ -25,21 +59,11 @@ SEARCH_CONFIG = {
     "region_id": 77,              # 77 = Москва
 
     # Цена
-    "max_price": 300_000_000,     # 300 млн рублей
+    "max_price": 700_000_000,     # 700 млн рублей
     "min_price": 1_000_000,       # 1 млн (отсекаем мусор)
 
-    # Ключевые слова для фильтрации лотов (в описании)
-    "keywords": [
-        "здание",
-        "нежилое здание",
-        "административное здание",
-        "офисное здание",
-        "бизнес-центр",
-        "офисный центр",
-        "мкд",
-        "многоквартирный дом",
-        "жилой дом",
-    ],
+    # Ключевые слова для фильтрации лотов (в описании) — используем PROPERTY_KEYWORDS
+    "keywords": PROPERTY_KEYWORDS,
 
     # Тип сообщения о торгах
     "trade_message_types": [
@@ -48,12 +72,24 @@ SEARCH_CONFIG = {
         "торги",
     ],
 
+    # Типы сообщений раннего захвата (инвентаризация / оценка)
+    "early_message_types": [
+        "сведения о результатах инвентаризации",
+        "результатах инвентаризации имущества",
+        "инвентаризация имущества",
+        "сведения о привлечении оценщика",
+        "привлечении оценщика",
+        "оценщик",
+        "PropertyInventoryResult",
+        "PropertyEvaluationReport",
+    ],
+
     # Пагинация (экономим запросы)
-    "orgs_per_request": 20,       # организаций за один search_ur
-    "msgs_per_request": 20,       # сообщений за один get_org_messages
+    "orgs_per_request": 1000,     # организаций за один search_ur
+    "msgs_per_request": 1000,     # сообщений за один get_org_messages
 
     # Лимиты
-    "daily_limit": 30,            # ОТЛАДКА: минимум, поднять до 240 когда стабильно
+    "daily_limit": 240,           # 250/день с запасом
     "request_delay": 2,           # секунд между запросами
 
     # Хранение статистики
@@ -67,6 +103,7 @@ class RequestCounter:
 
     def __init__(self, storage_file: str):
         self.storage_file = storage_file
+        self._today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self._load()
 
     def _load(self):
@@ -74,12 +111,12 @@ class RequestCounter:
             if os.path.exists(self.storage_file):
                 with open(self.storage_file, "r") as f:
                     data = json.load(f)
-                    self.count = data.get("fedresurs_today", 0)
                     last_reset = data.get("last_reset", "")
-                    # Сброс если новый день
-                    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    if last_reset != today:
+                    self._today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    if last_reset != self._today:
                         self.count = 0
+                    else:
+                        self.count = data.get("fedresurs_today", 0)
             else:
                 self.count = 0
         except Exception:
@@ -88,10 +125,9 @@ class RequestCounter:
     def _save(self):
         try:
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             data = {
                 "fedresurs_today": self.count,
-                "last_reset": today,
+                "last_reset": self._today,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             with open(self.storage_file, "w") as f:
@@ -100,6 +136,13 @@ class RequestCounter:
             logger.error(f"Не могу сохранить счётчик: {e}")
 
     def can_request(self) -> bool:
+        # Сбрасываем счётчик если наступил новый день (работаем без перезапуска)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != self._today:
+            self._today = today
+            self.count = 0
+            self._save()
+            logger.info(f"🔄 Новый день ({today}), счётчик запросов сброшен")
         return self.count < SEARCH_CONFIG["daily_limit"]
 
     def increment(self):
@@ -177,7 +220,7 @@ class FedresursSearch:
                 async with session.get(
                     url,
                     params=params,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=60)
                 ) as resp:
 
                     if resp.status == 403:
@@ -233,6 +276,8 @@ class FedresursSearch:
         data = await self._request("search_ur", {
             "orgRegionID": SEARCH_CONFIG["region_id"],
             "from_record": from_record,
+            "limit": SEARCH_CONFIG["orgs_per_request"],
+            "includeBankruptInfo": "true",
         })
 
         if not data or data.get("success") != 1:
@@ -292,6 +337,7 @@ class FedresursSearch:
         data = await self._request("get_org_messages", {
             "id": org_id,
             "from_record": from_record,
+            "limit": SEARCH_CONFIG["msgs_per_request"],
         })
 
         if not data or data.get("success") != 1:
@@ -306,10 +352,15 @@ class FedresursSearch:
         msg_type = (msg.get("type") or "").lower()
         return any(t in msg_type for t in SEARCH_CONFIG["trade_message_types"])
 
-    async def get_trade_message_ids(self, org: dict) -> list:
+    def _is_early_message(self, msg: dict) -> bool:
+        """Это сообщение раннего захвата (инвентаризация/оценка)?"""
+        msg_type = (msg.get("type") or "").lower()
+        return any(t.lower() in msg_type for t in SEARCH_CONFIG["early_message_types"])
+
+    async def get_message_ids_by_type(self, org: dict) -> dict:
         """
-        Из сообщений организации выбрать только о торгах.
-        Возвращает список id сообщений.
+        Из сообщений организации выбрать торги и ранние сообщения.
+        Возвращает {"trade": [...], "early": [...]}
         """
         org_id = org.get("id")
         org_name = org.get("debtor", "Неизвестно")
@@ -317,24 +368,30 @@ class FedresursSearch:
         messages, total = await self._get_org_messages(org_id, from_record=0)
 
         if not messages:
-            return []
+            return {"trade": [], "early": []}
 
         trade_ids = []
+        early_ids = []
         self.stats["messages_checked"] += len(messages)
 
         for msg in messages:
             if self._is_trade_message(msg):
                 trade_ids.append(msg["id"])
+            elif self._is_early_message(msg):
+                early_ids.append(msg["id"])
 
-        # Если торгов нет на первой странице и сообщений больше — не листаем
-        # (экономим запросы)
-        if trade_ids:
+        if trade_ids or early_ids:
             logger.info(
                 f"🏢 {org_name[:40]}: "
-                f"{len(trade_ids)} сообщений о торгах из {total}"
+                f"{len(trade_ids)} торгов, {len(early_ids)} ранних из {total}"
             )
 
-        return trade_ids
+        return {"trade": trade_ids, "early": early_ids}
+
+    # Backward compat
+    async def get_trade_message_ids(self, org: dict) -> list:
+        result = await self.get_message_ids_by_type(org)
+        return result["trade"]
 
     # ------------------------------------------------------------------
     # ШАГ 3: Детали сообщения о торгах
@@ -343,6 +400,52 @@ class FedresursSearch:
     async def get_message_details(self, msg_id: str) -> Optional[dict]:
         """Детальная информация о сообщении (с лотами)"""
         data = await self._request("get_message", {"id": msg_id})
+
+        if not data or data.get("success") != 1:
+            return None
+
+        return data.get("record")
+
+    # ------------------------------------------------------------------
+    # ЭТП методы
+    # ------------------------------------------------------------------
+
+    async def get_trade_messages(self, published_after: str, region_id: int = 77, limit: int = 1000) -> list:
+        """
+        Получить сообщения о торгах через ЭТП.
+        
+        Args:
+            published_after: Дата в формате YYYY-MM-DD
+            region_id: Код региона (77 = Москва)
+            limit: Максимальное количество записей
+        
+        Returns:
+            Список сообщений о торгах
+        """
+        data = await self._request("trade_messages", {
+            "published_after": published_after,
+            "region_id": region_id,
+            "limit": limit,
+        })
+
+        if not data or data.get("success") != 1:
+            return []
+
+        return data.get("records", [])
+
+    async def get_trade_message_content(self, guid: str) -> Optional[dict]:
+        """
+        Получить содержимое сообщения о торгах по GUID.
+        
+        Args:
+            guid: GUID сообщения
+        
+        Returns:
+            Детальная информация о сообщении
+        """
+        data = await self._request("trade_message_content", {
+            "guid": guid,
+        })
 
         if not data or data.get("success") != 1:
             return None
@@ -361,6 +464,8 @@ class FedresursSearch:
         description = (lot.get("description") or "").lower()
         lot_type = (lot.get("type") or "").lower()
         text_to_search = description + " " + lot_type
+        lot_num = lot.get("num", "?")
+        org_name = org.get("debtor", "?")[:40]
 
         # Фильтр по ключевым словам
         found_keyword = next(
@@ -368,6 +473,10 @@ class FedresursSearch:
             None
         )
         if not found_keyword:
+            logger.info(
+                f"⏭️ Лот #{lot_num} [{org_name}] — нет ключевых слов. "
+                f"description={description[:80]!r}, type={lot_type!r}"
+            )
             return None
 
         # Фильтр по цене
@@ -380,13 +489,39 @@ class FedresursSearch:
             price = 0
 
         if price <= SEARCH_CONFIG["min_price"]:
+            logger.info(
+                f"⏭️ Лот #{lot_num} [{org_name}] — цена слишком низкая: {price:,.0f} ₽ "
+                f"(мин {SEARCH_CONFIG['min_price']:,})"
+            )
             return None
 
         if price > SEARCH_CONFIG["max_price"]:
+            logger.info(
+                f"⏭️ Лот #{lot_num} [{org_name}] — цена слишком высокая: {price:,.0f} ₽ "
+                f"(макс {SEARCH_CONFIG['max_price']:,})"
+            )
+            return None
+
+        # Фильтр по географии — только Москва
+        # Проверяем описание лота и адрес должника
+        description_orig = (lot.get("description") or "")
+        debtor_address = (org.get("address") or "")
+        geo_text = (description_orig + " " + debtor_address).lower()
+        is_moscow = (
+            "москв" in geo_text or          # Москва / московск...
+            "77:" in description_orig or     # кадастровый номер Москвы
+            "г. москва" in geo_text or
+            "г москва" in geo_text
+        )
+        if not is_moscow:
+            logger.info(
+                f"⏭️ Лот #{lot_num} [{org_name}] — не Москва. "
+                f"address={debtor_address[:60]!r}, desc={description_orig[:60]!r}"
+            )
             return None
 
         # Лот прошёл фильтры!
-        return {
+        result = {
             # Данные лота
             "lot_num": lot.get("num"),
             "description": lot.get("description"),
@@ -419,6 +554,120 @@ class FedresursSearch:
             "manager_name": message.get("manager_name"),
         }
 
+        # ЭТП данные (если есть в сообщении)
+        if "etp_url" in message:
+            result["etp_url"] = message.get("etp_url")
+        if "etp_name" in message:
+            result["etp_name"] = message.get("etp_name")
+        if "application_start" in message:
+            result["application_start"] = message.get("application_start")
+        if "application_end" in message:
+            result["application_end"] = message.get("application_end")
+        if "organizer_name" in message:
+            result["organizer_name"] = message.get("organizer_name")
+
+        return result
+
+    # ------------------------------------------------------------------
+    # ЛИДЫ (ранний захват)
+    # ------------------------------------------------------------------
+
+    def _parse_lead(self, message: dict, org: dict, msg_type_label: str) -> Optional[dict]:
+        """
+        Из сообщения инвентаризации/оценки извлекаем лид.
+        Применяет семантический фильтр: (property AND geo) OR cadastral.
+        Возвращает dict лида или None.
+        """
+        org_name = org.get("debtor", "?")[:40]
+        msg_id = message.get("id") or message.get("num", "?")
+
+        # Собираем текст для анализа
+        description = message.get("description") or message.get("text") or ""
+        address = org.get("address") or ""
+        full_text = description + " " + address
+
+        # Если лоты есть — берём описание из первого лота
+        lots = message.get("lots") or []
+        if lots and not description:
+            description = lots[0].get("description", "")
+            full_text = description + " " + address
+
+        prop_match, geo_match, cad_match = semantic_match(full_text)
+        passes = (prop_match and geo_match) or cad_match
+
+        if not passes:
+            logger.info(
+                f"⏭️ Лид [{org_name}] msg={msg_id} — семантика не прошла "
+                f"(property={prop_match}, geo={geo_match}, cadastral={cad_match})"
+            )
+            return None
+
+        # Пытаемся извлечь стоимость из первого лота или поля message
+        estimated_value = None
+        if lots:
+            try:
+                price_str = str(lots[0].get("start_price", "") or "")
+                price_str = price_str.replace(" ", "").replace(",", ".").replace("\xa0", "")
+                if price_str:
+                    estimated_value = int(float(price_str))
+            except (ValueError, TypeError):
+                pass
+
+        # Определяем тип сообщения
+        msg_api_type = (message.get("type") or "").lower()
+        if "инвентаризац" in msg_api_type:
+            stage = "inventory"
+        elif "оценщик" in msg_api_type or "оценк" in msg_api_type:
+            stage = "evaluation"
+        else:
+            stage = msg_type_label
+
+        logger.info(
+            f"🌱 ЛИДCATCHER: [{org_name}] {stage} | "
+            f"property={prop_match} geo={geo_match} cad={cad_match} | "
+            f"desc={description[:60]!r}"
+        )
+
+        return {
+            "debtor_guid": org.get("id"),
+            "debtor_name": org.get("debtor"),
+            "debtor_inn": org.get("inn"),
+            "message_type": stage,
+            "description": description[:2000] if description else None,
+            "address": address[:500] if address else None,
+            "estimated_value": estimated_value,
+            "source_message_id": str(message.get("id") or ""),
+            "published_at": message.get("date_published"),
+        }
+
+    async def search_by_message_type(self, message_type: str, orgs: list) -> list:
+        """
+        Поиск лидов по типу сообщения среди уже полученных организаций.
+        message_type: 'PropertyInventoryResult' | 'PropertyEvaluationReport' | 'TradeMessage'
+        """
+        leads = []
+
+        for org in orgs:
+            if not self.counter.can_request():
+                break
+
+            ids_map = await self.get_message_ids_by_type(org)
+            target_ids = ids_map["early"] if message_type != "TradeMessage" else ids_map["trade"]
+
+            for msg_id in target_ids:
+                if not self.counter.can_request():
+                    break
+
+                message = await self.get_message_details(msg_id)
+                if not message:
+                    continue
+
+                lead = self._parse_lead(message, org, message_type.lower())
+                if lead:
+                    leads.append(lead)
+
+        return leads
+
     # ------------------------------------------------------------------
     # ГЛАВНЫЙ МЕТОД
     # ------------------------------------------------------------------
@@ -444,15 +693,16 @@ class FedresursSearch:
         logger.info("=" * 60)
 
         result_lots = []
+        result_leads = []
 
         # ШАГ 1: Все организации-банкроты Москвы
         orgs = await self.get_all_orgs()
 
         if not orgs:
             logger.error("❌ Нет организаций, останавливаемся")
-            return []
+            return {"lots": [], "leads": []}
 
-        # ШАГ 2 + 3: Для каждой организации — торги — лоты
+        # ШАГ 2 + 3: Для каждой организации — торги + ранние сообщения — лоты/лиды
         for idx, org in enumerate(orgs):
 
             if not self.counter.can_request():
@@ -462,35 +712,30 @@ class FedresursSearch:
                 )
                 break
 
-            # Сообщения о торгах этой организации
-            trade_msg_ids = await self.get_trade_message_ids(org)
-
-            if not trade_msg_ids:
-                continue
+            # Получаем ID сообщений: торги + ранние
+            ids_map = await self.get_message_ids_by_type(org)
+            trade_msg_ids = ids_map["trade"]
+            early_msg_ids = ids_map["early"]
 
             self.stats["trade_messages_found"] += len(trade_msg_ids)
 
-            # Детали каждого сообщения о торгах
+            # --- Торги → Лоты ---
             for msg_id in trade_msg_ids:
-
                 if not self.counter.can_request():
                     break
 
                 message = await self.get_message_details(msg_id)
-
                 if not message:
                     continue
 
                 lots = message.get("lots", [])
                 self.stats["lots_found"] += len(lots)
 
-                # Фильтрация лотов
                 for lot in lots:
                     filtered = self._filter_lot(lot, org, message)
                     if filtered:
                         self.stats["lots_passed_filter"] += 1
                         result_lots.append(filtered)
-
                         logger.info(
                             f"🎯 НАЙДЕН ЛОТ!\n"
                             f"   Должник: {filtered['debtor_name'][:50]}\n"
@@ -500,6 +745,19 @@ class FedresursSearch:
                             f"   Дело: {filtered['case_num']}"
                         )
 
+            # --- Ранние сообщения → Лиды ---
+            for msg_id in early_msg_ids:
+                if not self.counter.can_request():
+                    break
+
+                message = await self.get_message_details(msg_id)
+                if not message:
+                    continue
+
+                lead = self._parse_lead(message, org, "early")
+                if lead:
+                    result_leads.append(lead)
+
         # Итоги
         logger.info("=" * 60)
         logger.info("📊 ИТОГИ ПОИСКА:")
@@ -508,11 +766,12 @@ class FedresursSearch:
         logger.info(f"   Сообщений о торгах:        {self.stats['trade_messages_found']}")
         logger.info(f"   Лотов всего:               {self.stats['lots_found']}")
         logger.info(f"   Лотов после фильтра:       {self.stats['lots_passed_filter']}")
+        logger.info(f"   Лидов найдено:             {len(result_leads)}")
         logger.info(f"   Запросов потрачено:        {self.stats['requests_made']}")
         logger.info(f"   Осталось на сегодня:       {self.counter.remaining}")
         logger.info("=" * 60)
 
-        return result_lots
+        return {"lots": result_lots, "leads": result_leads}
 
     async def close(self):
         if self.session and not self.session.closed:

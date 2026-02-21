@@ -50,7 +50,7 @@ class Lot(Base):
     lot_number: Mapped[int] = mapped_column(Integer)
     description: Mapped[str] = mapped_column(Text)
     start_price: Mapped[Optional[float]] = mapped_column(Numeric(20, 2))
-    category_code: Mapped[Optional[str]] = mapped_column(String(20), index=True)
+    category_code: Mapped[Optional[str]] = mapped_column(Text, index=True)
 
     # Кадастровые номера (GIN индекс для поиска)
     cadastral_numbers: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}")
@@ -72,6 +72,35 @@ class Lot(Base):
     rosreestr_vri: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     rosreestr_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     needs_enrichment: Mapped[bool] = mapped_column(default=True, index=True)
+
+    # Данные должника (из Федресурс)
+    debtor_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    debtor_inn: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
+    debtor_ogrn: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    debtor_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Дело и управляющий
+    case_num: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    manager_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Параметры торгов
+    trade_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    trade_app_start: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    trade_app_end: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    trade_place: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    step: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    deposit: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # ЭТП данные
+    etp_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    etp_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    application_start: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    application_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    organizer_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Ссылка на сообщение Федресурс
+    message_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    message_num: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Скоринг
     deal_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 1), nullable=True)
@@ -125,3 +154,37 @@ class Document(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     lot: Mapped[Optional["Lot"]] = relationship("Lot", back_populates="documents")
+
+
+class Lead(Base):
+    """Ранние лиды — объекты на стадии инвентаризации/оценки до публикации торгов"""
+    __tablename__ = "leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Должник
+    debtor_guid: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    debtor_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    debtor_inn: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
+
+    # Тип сообщения: inventory / evaluation / trade
+    message_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Описание объекта из сообщения
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Оценочная стоимость (если есть в сообщении)
+    estimated_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Источник
+    source_message_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True, index=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Статус: new / monitoring / archived
+    status: Mapped[str] = mapped_column(String(20), default='new', index=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc)
+    )
