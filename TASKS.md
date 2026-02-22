@@ -21,6 +21,25 @@
 
 ## TASK-009: Оптимизация API-запросов ✅ ВЫПОЛНЕНО 21.02.2026
 
-## TASK-010: Интеграция /v1/trade-messages (ЭТП) ✅ ВЫПОЛНЕНО 21.02.2026
+**Выполнено:**
+- Добавлен `includeBankruptInfo=True` в запрос `search_ur`
+- Увеличены лимиты до 1000 (`orgs_per_request`, `msgs_per_request`)
+- Добавлен параметр `limit` в методы `_get_orgs_page` и `_get_org_messages`
+- Убраны отдельные запросы `get_bankrupt_info()`
+
+## TASK-010: Интеграция /v1/trade-messages (ЭТП) ✅ ВЫПОЛНЕНО 22.02.2026
+
+**Выполнено:**
+1. Добавлены методы в `FedresursSearch`:
+   - `get_trade_messages(published_after, region_id=77, limit=1000)`
+   - `get_trade_message_content(guid)`
+2. Добавлены новые поля в модель `Lot`:
+   - `etp_url TEXT`, `etp_name TEXT`
+   - `application_start TIMESTAMPTZ`, `application_end TIMESTAMPTZ`
+   - `organizer_name TEXT`
+3. Поля добавлены в базу данных (прямым SQL, т.к. миграция не сработала)
+4. Интегрировано в пайплайн поиска: метод `_filter_lot` извлекает ЭТП данные из сообщения
+
+**Примечание:** Поля были добавлены напрямую через SQL-запрос из-за проблем с Alembic миграцией.
 
 ## TASK-011: Семантический поиск + таблица leads ✅ ВЫПОЛНЕНО 21.02.2026
