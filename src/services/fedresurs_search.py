@@ -1,6 +1,6 @@
 """
 Fedresurs Search — поиск торгов по недвижимости в банкротных делах
-Pipeline: search_ur → get_org_messages → get_message → фильтрация → БД
+Pipeline (TASK-012): trade_messages?search={query} → дедупликация → trade_message_content → фильтрация → БД
 
 Автор: Fedresurs Pro
 Документация API: https://parser-api.com/documentation/fedresurs-api.txt
@@ -37,6 +37,18 @@ GEO_KEYWORDS = [
 ]
 
 CADASTRAL_PATTERN = re.compile(r'\b77:\d{2}:\d+')
+
+# ============================================================
+# ТЕКСТОВЫЕ ЗАПРОСЫ ДЛЯ TASK-012
+# ============================================================
+SEARCH_QUERIES = [
+    "нежилое здание Москва",
+    "офисное здание Москва",
+    "бизнес-центр Москва",
+    "торговый центр Москва",
+    "многоквартирный дом Москва",
+    "нежилое помещение Москва",
+]
 
 
 def semantic_match(text: str) -> tuple[bool, bool, bool]:
@@ -277,7 +289,6 @@ class FedresursSearch:
             "orgRegionID": SEARCH_CONFIG["region_id"],
             "from_record": from_record,
             "limit": SEARCH_CONFIG["orgs_per_request"],
-            "includeBankruptInfo": "true",
         })
 
         if not data or data.get("success") != 1:
@@ -292,7 +303,7 @@ class FedresursSearch:
         Получить все организации-банкроты Москвы.
         С пагинацией.
         """
-        logger.info(f"🔍 ШАГ 1: Поиск организаций-банкротов (регион=77 Москва)")
+        logger.info(f"🔍 ШАГ 1а: Поиск организаций-банкротов (регион=77 Москва)")
 
         all_orgs = []
         from_record = 0
@@ -325,16 +336,77 @@ class FedresursSearch:
             logger.info(f"📦 Получено: {len(all_orgs)}/{total}")
 
         self.stats["orgs_found"] = len(all_orgs)
-        logger.info(f"✅ ШАГ 1 завершён: {len(all_orgs)} организаций")
+        logger.info(f"✅ ШАГ 1а завершён: {len(all_orgs)} организаций")
         return all_orgs
+
+    async def _get_persons_page(self, from_record: int = 0) -> tuple[list, int]:
+        """
+        Одна страница поиска физлиц-банкротов в Москве.
+        Возвращает: (список физлиц, total_count)
+        """
+        data = await self._request("search_fiz", {
+            "fizRegionID": SEARCH_CONFIG["region_id"],
+            "from_record": from_record,
+            "limit": SEARCH_CONFIG["orgs_per_request"],
+        })
+
+        if not data or data.get("success") != 1:
+            return [], 0
+
+        records = data.get("records", [])
+        total = int(data.get("total_count", 0))
+        return records, total
+
+    async def get_all_persons(self) -> list:
+        """
+        Получить физлиц-банкротов Москвы с пагинацией.
+        Физлица = московские жители, у которых с высокой вероятностью
+        есть московская недвижимость (квартиры, нежилые помещения).
+        """
+        if not self.counter.can_request():
+            return []
+
+        logger.info(f"🔍 ШАГ 1б: Поиск физлиц-банкротов (регион=77 Москва)")
+
+        all_persons = []
+        from_record = 0
+
+        persons, total = await self._get_persons_page(from_record=0)
+
+        if not persons:
+            logger.info("ℹ️ Физлица-банкроты не найдены (или нет запросов)")
+            return []
+
+        all_persons.extend(persons)
+        logger.info(f"📊 Всего физлиц-банкротов в Москве: {total}")
+        logger.info(f"📦 Получено: {len(persons)} (страница 1)")
+
+        from_record = len(persons)
+
+        while from_record < total:
+            if not self.counter.can_request():
+                logger.warning(f"⚠️ Лимит! Остановились на {from_record}/{total} физлиц")
+                break
+
+            persons, _ = await self._get_persons_page(from_record=from_record)
+            if not persons:
+                break
+
+            all_persons.extend(persons)
+            from_record += len(persons)
+            logger.info(f"📦 Получено: {len(all_persons)}/{total} физлиц")
+
+        logger.info(f"✅ ШАГ 1б завершён: {len(all_persons)} физлиц")
+        return all_persons
 
     # ------------------------------------------------------------------
     # ШАГ 2: Сообщения организации
     # ------------------------------------------------------------------
 
-    async def _get_org_messages(self, org_id: str, from_record: int = 0) -> tuple[list, int]:
-        """Сообщения одной организации (одна страница)"""
-        data = await self._request("get_org_messages", {
+    async def _get_org_messages(self, org_id: str, from_record: int = 0, entity_type: str = "org") -> tuple[list, int]:
+        """Сообщения одной организации или физлица (одна страница)"""
+        endpoint = "get_person_messages" if entity_type == "fiz" else "get_org_messages"
+        data = await self._request(endpoint, {
             "id": org_id,
             "from_record": from_record,
             "limit": SEARCH_CONFIG["msgs_per_request"],
@@ -357,15 +429,15 @@ class FedresursSearch:
         msg_type = (msg.get("type") or "").lower()
         return any(t.lower() in msg_type for t in SEARCH_CONFIG["early_message_types"])
 
-    async def get_message_ids_by_type(self, org: dict) -> dict:
+    async def get_message_ids_by_type(self, org: dict, entity_type: str = "org") -> dict:
         """
-        Из сообщений организации выбрать торги и ранние сообщения.
+        Из сообщений организации/физлица выбрать торги и ранние сообщения.
         Возвращает {"trade": [...], "early": [...]}
         """
         org_id = org.get("id")
         org_name = org.get("debtor", "Неизвестно")
 
-        messages, total = await self._get_org_messages(org_id, from_record=0)
+        messages, total = await self._get_org_messages(org_id, from_record=0, entity_type=entity_type)
 
         if not messages:
             return {"trade": [], "early": []}
@@ -669,109 +741,144 @@ class FedresursSearch:
         return leads
 
     # ------------------------------------------------------------------
+    # TASK-012: поиск через trade_messages по тексту объявлений
+    # ------------------------------------------------------------------
+
+    async def search_via_trade_messages(self, published_after: datetime) -> dict:
+        """
+        TASK-012: Поиск через trade_messages API с текстовыми запросами.
+
+        Pipeline:
+        1. Для каждого запроса из SEARCH_QUERIES:
+           trade_messages?search={query}&publishedAfter={date} → список сообщений
+        2. Дедупликация по GUID (один запрос может дать пересечения)
+        3. trade_message_content(guid) → детали + лоты
+        4. Фильтр по ключевым словам + цене
+
+        Расход запросов: len(SEARCH_QUERIES) + N_matched ≤ 50 за цикл
+        """
+        published_after_str = published_after.strftime("%Y-%m-%d")
+        logger.info(f"🔍 TASK-012: text search, {len(SEARCH_QUERIES)} запросов, с {published_after_str}")
+
+        # Шаг 1: Обходим все текстовые запросы, дедуплицируем по GUID
+        all_messages: dict = {}  # guid → msg
+
+        for query in SEARCH_QUERIES:
+            if not self.counter.can_request():
+                logger.warning("⚠️ Лимит запросов при поиске!")
+                break
+
+            data = await self._request("trade_messages", {
+                "search": query,
+                "publishedAfter": published_after_str,
+                "limit": SEARCH_CONFIG["msgs_per_request"],
+            })
+
+            msgs = data.get("records", []) if (data and data.get("success") == 1) else []
+            new_count = 0
+            for msg in msgs:
+                guid = msg.get("guid") or msg.get("id")
+                if guid and guid not in all_messages:
+                    all_messages[guid] = msg
+                    new_count += 1
+
+            self.stats["messages_checked"] += len(msgs)
+            logger.info(f"   '{query}' → {len(msgs)} сообщений ({new_count} новых)")
+
+        if not all_messages:
+            logger.info("ℹ️ trade_messages: нет результатов ни по одному запросу")
+            return {"lots": [], "leads": []}
+
+        logger.info(f"📦 Уникальных сообщений к обработке: {len(all_messages)}")
+        self.stats["trade_messages_found"] = len(all_messages)
+
+        # Шаг 2: Для каждого уникального сообщения — детали + лоты
+        result_lots = []
+
+        for msg_guid, msg in all_messages.items():
+            if not self.counter.can_request():
+                logger.warning("⚠️ Лимит запросов при получении деталей!")
+                break
+
+            content = await self.get_trade_message_content(str(msg_guid))
+            if not content:
+                continue
+
+            # Строим псевдо-org из данных сообщения
+            # address fallback = "Москва" — текст запроса уже содержал "Москва"
+            org = {
+                "debtor": content.get("debtor_name") or content.get("organization_name", ""),
+                "inn": content.get("inn") or content.get("debtor_inn", ""),
+                "ogrn": content.get("ogrn") or content.get("debtor_ogrn", ""),
+                "address": content.get("address") or content.get("debtor_address") or "Москва",
+                "id": content.get("debtor_id") or content.get("organization_id", ""),
+                "region": "77",
+            }
+
+            lots = content.get("lots", [])
+            self.stats["lots_found"] += len(lots)
+
+            for lot in lots:
+                filtered = self._filter_lot(lot, org, content)
+                if filtered:
+                    self.stats["lots_passed_filter"] += 1
+                    result_lots.append(filtered)
+                    logger.info(
+                        f"🎯 НАЙДЕН ЛОТ!\n"
+                        f"   Должник: {filtered.get('debtor_name', '')[:50]}\n"
+                        f"   Описание: {filtered['description'][:80]}\n"
+                        f"   Цена: {filtered['start_price']:,.0f} ₽\n"
+                        f"   Ключ: [{filtered.get('found_keyword')}]"
+                    )
+
+        logger.info(
+            f"📊 Итого: {len(SEARCH_QUERIES)} запросов → "
+            f"{len(all_messages)} уникальных → {len(result_lots)} лотов"
+        )
+        return {"lots": result_lots, "leads": []}
+
+    # ------------------------------------------------------------------
     # ГЛАВНЫЙ МЕТОД
     # ------------------------------------------------------------------
 
-    async def search_lots(self) -> list:
+    async def search_lots(self, published_after: Optional[datetime] = None) -> dict:
         """
-        Главный метод поиска.
+        TASK-012: Главный метод поиска — текстовый поиск через trade_messages.
 
         Pipeline:
-        1. Получить все организации-банкроты Москвы
-        2. Для каждой — найти сообщения о торгах
-        3. Для каждого сообщения — получить лоты
-        4. Фильтровать: здание + цена до 300М
+        1. Для каждого запроса из SEARCH_QUERIES:
+           trade_messages?search={query}&publishedAfter={date}
+        2. Дедупликация по GUID
+        3. trade_message_content(guid) → лоты
+        4. Фильтр по ключевым словам + цена
 
-        Returns: список отфильтрованных лотов
+        Расход лимита: len(SEARCH_QUERIES) + N_matched ≤ 50 запросов/цикл
+        Returns: {"lots": [...], "leads": [...]}
         """
+        if published_after is None:
+            published_after = datetime.now(timezone.utc) - timedelta(days=7)
+
         logger.info("=" * 60)
-        logger.info("🚀 FEDRESURS PRO — ПОИСК ТОРГОВ")
-        logger.info(f"📍 Регион: Москва (77)")
+        logger.info("🚀 FEDRESURS PRO — ПОИСК ТОРГОВ (TASK-012: text search)")
         logger.info(f"💰 Цена: {SEARCH_CONFIG['min_price']:,} — {SEARCH_CONFIG['max_price']:,} ₽")
-        logger.info(f"🏢 Типы: {', '.join(SEARCH_CONFIG['keywords'])}")
+        logger.info(f"📅 Поиск с: {published_after.strftime('%Y-%m-%d %H:%M UTC')}")
+        logger.info(f"🔍 Запросов: {len(SEARCH_QUERIES)}")
         logger.info(f"📡 Осталось запросов сегодня: {self.counter.remaining}")
         logger.info("=" * 60)
 
-        result_lots = []
-        result_leads = []
+        result = await self.search_via_trade_messages(published_after)
 
-        # ШАГ 1: Все организации-банкроты Москвы
-        orgs = await self.get_all_orgs()
-
-        if not orgs:
-            logger.error("❌ Нет организаций, останавливаемся")
-            return {"lots": [], "leads": []}
-
-        # ШАГ 2 + 3: Для каждой организации — торги + ранние сообщения — лоты/лиды
-        for idx, org in enumerate(orgs):
-
-            if not self.counter.can_request():
-                logger.warning(
-                    f"⚠️ Лимит запросов! Обработано {idx}/{len(orgs)} организаций. "
-                    f"Продолжим завтра."
-                )
-                break
-
-            # Получаем ID сообщений: торги + ранние
-            ids_map = await self.get_message_ids_by_type(org)
-            trade_msg_ids = ids_map["trade"]
-            early_msg_ids = ids_map["early"]
-
-            self.stats["trade_messages_found"] += len(trade_msg_ids)
-
-            # --- Торги → Лоты ---
-            for msg_id in trade_msg_ids:
-                if not self.counter.can_request():
-                    break
-
-                message = await self.get_message_details(msg_id)
-                if not message:
-                    continue
-
-                lots = message.get("lots", [])
-                self.stats["lots_found"] += len(lots)
-
-                for lot in lots:
-                    filtered = self._filter_lot(lot, org, message)
-                    if filtered:
-                        self.stats["lots_passed_filter"] += 1
-                        result_lots.append(filtered)
-                        logger.info(
-                            f"🎯 НАЙДЕН ЛОТ!\n"
-                            f"   Должник: {filtered['debtor_name'][:50]}\n"
-                            f"   Описание: {filtered['description'][:80]}\n"
-                            f"   Цена: {filtered['start_price']:,.0f} ₽\n"
-                            f"   Ключевое слово: [{filtered['found_keyword']}]\n"
-                            f"   Дело: {filtered['case_num']}"
-                        )
-
-            # --- Ранние сообщения → Лиды ---
-            for msg_id in early_msg_ids:
-                if not self.counter.can_request():
-                    break
-
-                message = await self.get_message_details(msg_id)
-                if not message:
-                    continue
-
-                lead = self._parse_lead(message, org, "early")
-                if lead:
-                    result_leads.append(lead)
-
-        # Итоги
         logger.info("=" * 60)
         logger.info("📊 ИТОГИ ПОИСКА:")
-        logger.info(f"   Организаций проверено:     {self.stats['orgs_found']}")
         logger.info(f"   Сообщений проверено:       {self.stats['messages_checked']}")
-        logger.info(f"   Сообщений о торгах:        {self.stats['trade_messages_found']}")
+        logger.info(f"   Уникальных торгов:         {self.stats['trade_messages_found']}")
         logger.info(f"   Лотов всего:               {self.stats['lots_found']}")
         logger.info(f"   Лотов после фильтра:       {self.stats['lots_passed_filter']}")
-        logger.info(f"   Лидов найдено:             {len(result_leads)}")
         logger.info(f"   Запросов потрачено:        {self.stats['requests_made']}")
         logger.info(f"   Осталось на сегодня:       {self.counter.remaining}")
         logger.info("=" * 60)
 
-        return {"lots": result_lots, "leads": result_leads}
+        return result
 
     async def close(self):
         if self.session and not self.session.closed:

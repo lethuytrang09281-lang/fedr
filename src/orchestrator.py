@@ -212,11 +212,14 @@ class Orchestrator:
 
         # 🔄 Используем FedresursSearch для поиска лотов
         try:
+            # Берём дату последнего поиска для окна published_after
+            last_processed = await self.get_last_processed_date("trade_monitor", default_days_back=7)
+
             search = FedresursSearch(
                 api_key=self.settings.PARSER_API_KEY,
                 resource_monitor=self.resource_monitor
             )
-            result = await search.search_lots()
+            result = await search.search_lots(published_after=last_processed)
             await search.close()
 
             lots = result.get("lots", []) if isinstance(result, dict) else result
