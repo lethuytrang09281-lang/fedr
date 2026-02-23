@@ -575,10 +575,10 @@ class FedresursSearch:
             return None
 
         # Фильтр по географии — только Москва
-        # Проверяем описание лота и адрес должника
+        # Проверяем ТОЛЬКО описание лота (не адрес должника — он может быть в Москве, а имущество где угодно)
         description_orig = (lot.get("description") or "")
-        debtor_address = (org.get("address") or "")
-        geo_text = (description_orig + " " + debtor_address).lower()
+        lot_address = (lot.get("address") or lot.get("location") or "")
+        geo_text = (description_orig + " " + lot_address).lower()
         is_moscow = (
             "москв" in geo_text or          # Москва / московск...
             "77:" in description_orig or     # кадастровый номер Москвы
@@ -843,42 +843,97 @@ class FedresursSearch:
 
     async def search_lots(self, published_after: Optional[datetime] = None) -> dict:
         """
-        TASK-012: Главный метод поиска — текстовый поиск через trade_messages.
+        Главный метод поиска — старый пайплайн через организации-банкроты.
 
         Pipeline:
-        1. Для каждого запроса из SEARCH_QUERIES:
-           trade_messages?search={query}&publishedAfter={date}
-        2. Дедупликация по GUID
-        3. trade_message_content(guid) → лоты
-        4. Фильтр по ключевым словам + цена
+        1. search_ur(region=77) → список организаций-банкротов Москвы
+        2. get_org_messages(org_id) → торговые сообщения каждой организации
+        3. get_message(msg_id) → детали с лотами
+        4. Фильтр: ключевые слова в описании лота + цена + Москва в описании лота
 
-        Расход лимита: len(SEARCH_QUERIES) + N_matched ≤ 50 запросов/цикл
+        Гео-логика: регион=77 — место регистрации юрлица (прокси для поиска),
+        но финальный фильтр проверяет наличие "Москва" / кадастра 77: в описании
+        самого лота, а не адреса должника.
+
         Returns: {"lots": [...], "leads": [...]}
         """
-        if published_after is None:
-            published_after = datetime.now(timezone.utc) - timedelta(days=7)
-
         logger.info("=" * 60)
-        logger.info("🚀 FEDRESURS PRO — ПОИСК ТОРГОВ (TASK-012: text search)")
+        logger.info("🚀 FEDRESURS PRO — ПОИСК ТОРГОВ")
         logger.info(f"💰 Цена: {SEARCH_CONFIG['min_price']:,} — {SEARCH_CONFIG['max_price']:,} ₽")
-        logger.info(f"📅 Поиск с: {published_after.strftime('%Y-%m-%d %H:%M UTC')}")
-        logger.info(f"🔍 Запросов: {len(SEARCH_QUERIES)}")
+        logger.info(f"📍 Регион: Москва (77) — регистрация юрлица")
+        logger.info(f"🔎 Гео-фильтр: Москва в описании лота или кадастр 77:xx")
         logger.info(f"📡 Осталось запросов сегодня: {self.counter.remaining}")
         logger.info("=" * 60)
 
-        result = await self.search_via_trade_messages(published_after)
+        result_lots = []
+        result_leads = []
+
+        # Шаг 1: Организации-банкроты Москвы
+        orgs = await self.get_all_orgs()
+        if not orgs:
+            logger.info("ℹ️ Организации не найдены")
+            return {"lots": [], "leads": []}
+
+        # Шаг 2-3: Сообщения каждой организации → лоты
+        for org in orgs:
+            if not self.counter.can_request():
+                logger.warning("⚠️ Лимит запросов при обходе организаций!")
+                break
+
+            ids_map = await self.get_message_ids_by_type(org)
+            trade_ids = ids_map["trade"]
+            early_ids = ids_map["early"]
+
+            # Торговые сообщения → лоты
+            for msg_id in trade_ids:
+                if not self.counter.can_request():
+                    break
+
+                message = await self.get_message_details(msg_id)
+                if not message:
+                    continue
+
+                lots = message.get("lots", [])
+                self.stats["lots_found"] += len(lots)
+
+                for lot in lots:
+                    filtered = self._filter_lot(lot, org, message)
+                    if filtered:
+                        self.stats["lots_passed_filter"] += 1
+                        result_lots.append(filtered)
+                        logger.info(
+                            f"🎯 НАЙДЕН ЛОТ!\n"
+                            f"   Должник: {filtered.get('debtor_name', '')[:50]}\n"
+                            f"   Описание: {filtered['description'][:80]}\n"
+                            f"   Цена: {filtered['start_price']:,.0f} ₽\n"
+                            f"   Ключ: [{filtered.get('found_keyword')}]"
+                        )
+
+            # Ранние сообщения → лиды
+            for msg_id in early_ids:
+                if not self.counter.can_request():
+                    break
+
+                message = await self.get_message_details(msg_id)
+                if not message:
+                    continue
+
+                lead = self._parse_lead(message, org, "early")
+                if lead:
+                    result_leads.append(lead)
 
         logger.info("=" * 60)
         logger.info("📊 ИТОГИ ПОИСКА:")
+        logger.info(f"   Организаций обработано:    {self.stats['orgs_found']}")
         logger.info(f"   Сообщений проверено:       {self.stats['messages_checked']}")
-        logger.info(f"   Уникальных торгов:         {self.stats['trade_messages_found']}")
         logger.info(f"   Лотов всего:               {self.stats['lots_found']}")
         logger.info(f"   Лотов после фильтра:       {self.stats['lots_passed_filter']}")
+        logger.info(f"   Лидов найдено:             {len(result_leads)}")
         logger.info(f"   Запросов потрачено:        {self.stats['requests_made']}")
         logger.info(f"   Осталось на сегодня:       {self.counter.remaining}")
         logger.info("=" * 60)
 
-        return result
+        return {"lots": result_lots, "leads": result_leads}
 
     async def close(self):
         if self.session and not self.session.closed:
