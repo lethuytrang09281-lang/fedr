@@ -42,3 +42,62 @@
 - `search_lots()` — возврат к пайплайну: `search_ur(77)` → `get_org_messages` → `get_message` → фильтр
 - `_filter_lot()` — гео-фильтр теперь проверяет только `lot.description` + `lot.address/location`,
   адрес должника исключён из проверки
+
+cat >> /mnt/skills/user/fedresurs-pro/TASKS.md << 'EOF'
+
+## TASK-014: Фильтрация по дате в пайплайне НЕ ВЫПОЛНЕНА ОРКЕСТРАТОР УПАЛ
+- **Статус:** 🟡 в работе
+- **Агент:** DeepSeek V3.2 (KiloCode)
+- **Файл:** `/root/fedr/src/services/fedresurs_search.py`
+- **Описание:**
+  1. В `get_org_messages` — отсекать сообщения старше `published_after` по полю `"date"` (формат "16.10.2025 14:48:09") ДО вызова `get_message`
+  2. В `_filter_lot` — отсекать лоты где `trade_app_end_date` < `datetime.now(UTC)`. Если поле отсутствует — не отбраковывать
+- **Критерий:** в логах видно количество отсеянных сообщений по дате
+- **НЕ ТРОГАТЬ:** логику `search_ur`, гео-фильтр, скоринг
+
+## ФИНАЛ (агент выполняет после завершения):
+```bash
+cd /root/fedr
+git add -A
+git commit -m "feat: TASK-014 date filter in pipeline"
+git push origin master
+sed -i 's/Статус:\*\* 🟡 в работе\n- \*\*Агент:\*\* DeepSeek V3.2 (KiloCode)/Статус:** 🟢 готова/' /mnt/skills/user/fedresurs-pro/TASKS.md
+git add /mnt/skills/user/fedresurs-pro/TASKS.md
+git commit -m "tasks: TASK-014 done"
+git push origin master
+```
+EOF
+
+cd /root/fedr
+git add /mnt/skills/user/fedresurs-pro/TASKS.md
+git commit -m "tasks: add TASK-014"
+git push origin master
+echo "✅ TASK-014 записана"
+```
+
+После выполнения — открывай KiloCode, выбирай DeepSeek V3.2, пиши:
+```
+Выполни TASK-014 из /mnt/skills/user/fedresurs-pro/TASKS.md
+
+
+***ЗАДАЧА Claude Code — TASK-014: Фильтрация по дате в пайплайне***
+Прочитай перед началом: /root/fedr/skills/fedresurs-pro/SKILL.md
+Файл: /root/fedr/src/services/fedresurs_search.py
+Что сделать:
+Шаг 1 — в get_org_messages: при итерации по сообщениям парсить поле "date" (формат "16.10.2025 14:48:09"), пропускать всё старше published_after. Только свежие ID передавать в get_message.
+Шаг 2 — в _filter_lot: если trade_app_end_date существует И меньше datetime.now(UTC) → return None. Если поле отсутствует — не отбраковывать.
+НЕ ТРОГАТЬ: search_ur, гео-фильтр, скоринг, всё остальное.
+Как проверить:
+bashdocker compose build app && docker compose up -d app
+docker logs fedr-app-1 2>&1 | grep -E "пропущ|skip|дата|old|filter" | tail -20
+Финал — обязательно после выполнения:
+bashcd /root/fedr
+git add -A
+git commit -m "feat: TASK-014 date filter in pipeline"
+git push origin master
+
+# Обновить статус задачи
+sed -i 's/TASK-014.*🟡 в работе/TASK-014: 🟢 готова/' /root/fedr/skills/fedresurs-pro/TASKS.md
+git add skills/fedresurs-pro/TASKS.md
+git commit -m "tasks: TASK-014 done"
+git push origin master

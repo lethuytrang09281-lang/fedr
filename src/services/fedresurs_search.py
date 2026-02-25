@@ -192,9 +192,11 @@ class FedresursSearch:
         self.stats = {
             "orgs_found": 0,
             "messages_checked": 0,
+            "messages_filtered_by_date": 0,
             "trade_messages_found": 0,
             "lots_found": 0,
             "lots_passed_filter": 0,
+            "lots_filtered_by_end_date": 0,
             "requests_made": 0,
         }
 
@@ -429,7 +431,7 @@ class FedresursSearch:
         msg_type = (msg.get("type") or "").lower()
         return any(t.lower() in msg_type for t in SEARCH_CONFIG["early_message_types"])
 
-    async def get_message_ids_by_type(self, org: dict, entity_type: str = "org") -> dict:
+    async def get_message_ids_by_type(self, org: dict, entity_type: str = "org", published_after: Optional[datetime] = None) -> dict:
         """
         Из сообщений организации/физлица выбрать торги и ранние сообщения.
         Возвращает {"trade": [...], "early": [...]}
@@ -444,13 +446,33 @@ class FedresursSearch:
 
         trade_ids = []
         early_ids = []
-        self.stats["messages_checked"] += len(messages)
+        filtered_by_date = 0
 
+        # Фильтрация по дате published_after
         for msg in messages:
+            msg_date_str = msg.get("date")
+            if published_after and msg_date_str:
+                # Формат даты: "16.10.2025 14:48:09"
+                try:
+                    msg_date = datetime.strptime(msg_date_str, "%d.%m.%Y %H:%M:%S").replace(tzinfo=timezone.utc)
+                    if msg_date < published_after:
+                        filtered_by_date += 1
+                        continue
+                except ValueError:
+                    # Если формат не совпадает, пропускаем фильтр
+                    pass
+
             if self._is_trade_message(msg):
                 trade_ids.append(msg["id"])
             elif self._is_early_message(msg):
                 early_ids.append(msg["id"])
+
+        self.stats["messages_checked"] += len(messages)
+        self.stats["messages_filtered_by_date"] += filtered_by_date
+        if filtered_by_date:
+            logger.info(
+                f"📅 {org_name[:40]}: отсеяно {filtered_by_date} сообщений старше {published_after}"
+            )
 
         if trade_ids or early_ids:
             logger.info(
@@ -591,6 +613,23 @@ class FedresursSearch:
                 f"address={debtor_address[:60]!r}, desc={description_orig[:60]!r}"
             )
             return None
+
+        # Фильтр по дате окончания приёма заявок (trade_app_end_date)
+        trade_app_end = message.get("trade_app_end_date")
+        if trade_app_end:
+            try:
+                # Формат даты: "16.10.2025 14:48:09"
+                end_date = datetime.strptime(trade_app_end, "%d.%m.%Y %H:%M:%S").replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                if end_date < now:
+                    logger.info(
+                        f"⏭️ Лот #{lot_num} [{org_name}] — приём заявок завершён {trade_app_end}"
+                    )
+                    self.stats["lots_filtered_by_end_date"] += 1
+                    return None
+            except ValueError:
+                # Если формат не совпадает, пропускаем фильтр
+                pass
 
         # Лот прошёл фильтры!
         result = {
@@ -880,7 +919,7 @@ class FedresursSearch:
                 logger.warning("⚠️ Лимит запросов при обходе организаций!")
                 break
 
-            ids_map = await self.get_message_ids_by_type(org)
+            ids_map = await self.get_message_ids_by_type(org, published_after=published_after)
             trade_ids = ids_map["trade"]
             early_ids = ids_map["early"]
 
@@ -926,8 +965,10 @@ class FedresursSearch:
         logger.info("📊 ИТОГИ ПОИСКА:")
         logger.info(f"   Организаций обработано:    {self.stats['orgs_found']}")
         logger.info(f"   Сообщений проверено:       {self.stats['messages_checked']}")
+        logger.info(f"   Сообщений отсеяно по дате: {self.stats['messages_filtered_by_date']}")
         logger.info(f"   Лотов всего:               {self.stats['lots_found']}")
         logger.info(f"   Лотов после фильтра:       {self.stats['lots_passed_filter']}")
+        logger.info(f"   Лотов отсеяно по дате окончания: {self.stats['lots_filtered_by_end_date']}")
         logger.info(f"   Лидов найдено:             {len(result_leads)}")
         logger.info(f"   Запросов потрачено:        {self.stats['requests_made']}")
         logger.info(f"   Осталось на сегодня:       {self.counter.remaining}")
