@@ -544,7 +544,3 @@ class Orchestrator:
         finally:
             # 🛑 Остановка Resource Monitor при завершении
             await self.resource_monitor.stop()
-
-
-# Глобальный экземпляр оркестратора для удобства
-orchestrator = Orchestrator()
