@@ -1,3 +1,51 @@
+# FEDRESURS PRO — СОСТОЯНИЕ
+
+## Дата последнего обновления: 2026-02-26
+
+## ✅ ЧТО РАБОТАЕТ (не трогать)
+- [x] Docker: app + db — контейнеры поднимаются
+- [x] PostgreSQL: cadastral_index 584k, market_benchmarks 60
+- [x] FastAPI на :8000 — отвечает
+- [x] FedresursSearch: search_ur → get_org_messages → get_message
+- [x] DealScorer: deal_score = investment - fraud*0.6 (logic/scorer.py)
+- [x] Telegram: уведомления при deal_score ≥ 80
+- [x] Hunter Engine: 4 стратегии написаны (early_bird, hidden_gem, public_offer, conflict_analyzer)
+- [x] Antifraud Engine v2: 4 модуля написаны (benchmark, velocity, nlp, manager_karma)
+- [x] document_extractor.py: парсинг PDF/DOCX (текстовый слой)
+- [x] checko_client.py, rosreestr_client.py — работают
+- [x] Git: один master, все изменения запушены
+
+## ❌ ЧТО СЛОМАНО / НЕ ИНТЕГРИРОВАНО
+- [ ] Hunter Engine НЕ импортирован в orchestrator.py
+- [ ] Antifraud Engine v2 НЕ импортирован в orchestrator.py
+- [ ] Enrichment Worker не запускается (класс есть в enricher.py, вызова нет)
+- [ ] BUG-001: дублирование модели Document (document_model.py + models.py)
+- [ ] BUG-002: два разных Base (base.py и models.py)
+- [ ] BUG-003: перепутаны аргументы calculate_current_price в orchestrator.py ~172
+- [ ] BUG-004: research.py вызывает несуществующий метод enrich_cadastral_data
+- [ ] BUG-005: research.py → _get_lot_data использует несуществующие поля модели Lot
+- [ ] BUG-006: research_routes.py — два сломанных импорта
+- [ ] BUG-007: глобальный экземпляр orchestrator = Orchestrator() при импорте
+
+## 🔴 ОТСУТСТВУЕТ В БД
+- watchlist — early_bird.py
+- managers — manager_karma.py
+- manager_conflicts — conflict_analyzer.py
+- price_alerts — public_offer.py
+
+## 🔄 ТЕКУЩАЯ ЗАДАЧА
+TASK-018: порядок в git и skills — завершается
+
+## ➡️ СЛЕДУЮЩАЯ ЗАДАЧА
+TASK-BUG-001: удалить document_model.py
+
+## 📝 ЛОГ РЕШЁННЫХ ПРОБЛЕМ
+- 2026-02-25: TASK-014 — фильтрация по дате в пайплайне
+- 2026-02-26: TASK-018 — git порядок: master синхронизирован, feature ветки удалены
+- 2026-02-26: scp hunter/ и antifraud/ скопированы на VPS
+
+---
+
 # CLAUDE.md — Fedresurs Pro
 > Читается Claude Code автоматически. Обновлять в конце каждой сессии — добавлять новую сессию в конец файла.
 
@@ -448,7 +496,7 @@ docker exec fedr-db-1 psql -U postgres -d fedresurs_db \
 2. checko_client.py → директор, антифрод (используя debtor_inn)
 3. moscow_api_client.py → охранные зоны, ПЗЗ
 4. Скоринг → deal_score = investment - fraud*0.6
-5. Telegram уведомления для score >= 80   
+5. Telegram уведомления для score >= 80
 
 ---
 
@@ -530,53 +578,3 @@ curl -s "https://parser-api.com/stat/?key=ede50185e3ccc8589a5c6c6efebc14cc"
 - Оптимизация API-запросов завершена, ожидается сокращение расхода лимитов
 - Интеграция ЭТП данных выполнена, система готова к сбору дополнительной информации о торгах
 - Все изменения закоммичены и готовы к тестированию в следующем цикле оркестратора
-
----
-
-# FEDRESURS PRO — СОСТОЯНИЕ
-
-## Дата последнего обновления: 2026-02-26
-
-## ✅ ЧТО РАБОТАЕТ (проверено, не трогать)
-- [x] Docker: app + db — контейнеры поднимаются
-- [x] PostgreSQL: cadastral_index 584k, market_benchmarks 60
-- [x] FastAPI на :8000 — отвечает
-- [x] FedresursSearch: search_ur → get_org_messages → get_message
-- [x] DealScorer: deal_score = investment - fraud*0.6 (logic/scorer.py)
-- [x] Telegram: уведомления при deal_score ≥ 80
-- [x] Hunter Engine: 4 стратегии написаны (early_bird, hidden_gem, public_offer, conflict_analyzer)
-- [x] Antifraud Engine v2: 4 модуля написаны (benchmark, velocity, nlp, manager_karma)
-- [x] document_extractor.py: парсинг PDF/DOCX (текстовый слой)
-- [x] checko_client.py, rosreestr_client.py — работают
-- [x] Git: один master, все изменения запушены
-
-## ❌ ЧТО СЛОМАНО / НЕ ИНТЕГРИРОВАНО
-- [ ] Hunter Engine НЕ импортирован в orchestrator.py — стратегии не работают
-- [ ] Antifraud Engine v2 НЕ импортирован в orchestrator.py — 4 метрики не считаются
-- [ ] Enrichment Worker не запускается (класс есть в enricher.py, вызова нет)
-- [ ] Текущий скоринг упрощён (logic/scorer.py вместо hunter/investment_scorer.py)
-- [ ] BUG-001: дублирование модели Document (document_model.py + models.py)
-- [ ] BUG-002: два разных Base (base.py и models.py)
-- [ ] BUG-003: перепутаны аргументы calculate_current_price в orchestrator.py ~172
-- [ ] BUG-004: research.py вызывает несуществующий метод enrich_cadastral_data
-- [ ] BUG-005: research.py → _get_lot_data использует несуществующие поля модели Lot
-- [ ] BUG-006: research_routes.py — два сломанных импорта
-- [ ] BUG-007: глобальный экземпляр orchestrator = Orchestrator() при импорте
-
-## 🔴 ОТСУТСТВУЕТ В БД (нужны таблицы)
-- watchlist — early_bird.py (5 мест)
-- managers — manager_karma.py
-- manager_conflicts — conflict_analyzer.py
-- price_alerts — public_offer.py
-- (cadastral_index и market_benchmarks уже есть)
-
-## 🔄 ТЕКУЩАЯ ЗАДАЧА
-TASK-015: наведение порядка в git и skills — в процессе
-
-## ➡️ СЛЕДУЮЩАЯ ЗАДАЧА
-BUG-001: удалить document_model.py (дубликат Document)
-
-## 📝 ЛОГ РЕШЁННЫХ ПРОБЛЕМ
-- 2026-02-25: TASK-014 — фильтрация по дате в пайплайне (отсев исторических сообщений)
-- 2026-02-26: TASK-015 — git порядок: master синхронизирован, feature ветки удалены
-- 2026-02-26: scp hunter/ и antifraud/ скопированы на VPS с локальной машины
