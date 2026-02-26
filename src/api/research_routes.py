@@ -9,7 +9,7 @@ import logging
 from src.database.base import get_db_session
 from src.services.checko_client import CheckoAPIClient
 from src.services.research import ResearchService
-from src.services.rosreestr import RosreestrEnricher
+from src.services.enricher import RosreestrEnricher
 from src.config import settings
 
 logger = logging.getLogger(__name__)
