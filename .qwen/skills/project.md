@@ -1,0 +1,1 @@
+/root/fedr/skills/SKILL.md
