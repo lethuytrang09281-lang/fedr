@@ -267,7 +267,7 @@ class ResearchService:
     async def _get_lot_data(self, db: AsyncSession, cadastral_number: str) -> Optional[Dict[str, Any]]:
         """Fetch lot data from database."""
         try:
-            stmt = select(Lot).where(Lot.cadastral_number == cadastral_number)
+            stmt = select(Lot).where(cadastral_number == Lot.cadastral_numbers[0])
             result = await db.execute(stmt)
             lot = result.scalar_one_or_none()
 
@@ -276,13 +276,11 @@ class ResearchService:
 
             return {
                 "lot_id": lot.id,
-                "message_guid": str(lot.message_guid),
-                "price_start": float(lot.price_start) if lot.price_start else None,
-                "price_step": float(lot.price_step) if lot.price_step else None,
-                "date_auction": lot.date_auction.isoformat() if lot.date_auction else None,
+                "message_guid": str(lot.message_id) if lot.message_id else None,
+                "start_price": float(lot.start_price) if lot.start_price else None,
                 "debtor_name": lot.debtor_name,
-                "manager_company": lot.manager_company,
-                "zone": lot.zone,
+                "manager_name": lot.manager_name,
+                "location_zone": lot.location_zone,
                 "source": "Fedresurs Database"
             }
         except Exception as e:
