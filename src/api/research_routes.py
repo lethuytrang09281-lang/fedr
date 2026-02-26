@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import logging
 
-from src.database.base import get_db
+from src.database.base import get_db_session
 from src.services.checko_client import CheckoAPIClient
 from src.services.research import ResearchService
 from src.services.rosreestr import RosreestrEnricher
@@ -40,7 +40,7 @@ async def research_property(
     cadastral_number: str,
     owner_inn: Optional[str] = Query(None, description="Optional owner INN for deep research"),
     service: ResearchService = Depends(get_research_service),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Comprehensive property research.

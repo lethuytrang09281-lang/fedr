@@ -51,7 +51,9 @@ class ResearchService:
 
         # 1. Get property data from Rosreestr
         logger.info(f"Fetching property data for {cadastral_number}")
-        property_data = await self.rosreestr.enrich_cadastral_data(cadastral_number)
+        property_data = await self.rosreestr.get_parcel_info(cadastral_number)
+        if not property_data:
+            property_data = await self.rosreestr.get_building_info(cadastral_number)
 
         if property_data:
             report["property_data"] = {
