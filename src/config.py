@@ -37,11 +37,11 @@ class Settings(BaseSettings):
     # Moscow Open Data API
     MOSCOW_API_KEY: str = "a32c7b59-183e-4643-ba40-6259eeb9c8b7"
 
-    # FTP Archive Access (demo credentials)
-    FTP_HOST: str = "ftp.fedresurs.ru"
-    FTP_USER: str = "demo"
-    FTP_PASSWORD: str = "demo"
-    FTP_DOWNLOAD_LIMIT_MB: int = 50
+    # ЕФРСБ архивы (HTTPS, demo credentials)
+    EFRSB_ARCHIVE_URL: str = "https://download.fedresurs.ru/export_messages/"
+    EFRSB_ARCHIVE_USER: str = "demowebuser"
+    EFRSB_ARCHIVE_PASSWORD: str = "Ax!761BN"
+    EFRSB_ARCHIVE_MAX_MB: int = 200
 
     # Orchestrator settings
     SCAN_INTERVAL_HOURS: int = 1  # Интервал сканирования в часах

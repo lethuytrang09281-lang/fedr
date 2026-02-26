@@ -610,7 +610,7 @@ class FedresursSearch:
         if not is_moscow:
             logger.info(
                 f"⏭️ Лот #{lot_num} [{org_name}] — не Москва. "
-                f"address={debtor_address[:60]!r}, desc={description_orig[:60]!r}"
+                f"address={lot_address[:60]!r}, desc={description_orig[:60]!r}"
             )
             return None
 
